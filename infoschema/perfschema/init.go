@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/ddl"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/infoschema"
@@ -54,10 +55,14 @@ func Init() {
 			}
 			tbls = append(tbls, meta)
 			var ok bool
-			meta.ID, ok = tableIDMap[meta.Name.O]
+			_, ok = tableIDMap[meta.Name.O]
 			if !ok {
 				panic(fmt.Sprintf("get performance_schema table id failed, unknown system table `%v`", meta.Name.O))
 			}
+			if config.GetGlobalConfig().Tenant.IsTenant {
+				tableIDMap[meta.Name.O] += int64(config.GetGlobalConfig().Tenant.TenantId) << config.BitsReserved4TenantTableId
+			}
+			meta.ID = tableIDMap[meta.Name.O]
 			for i, c := range meta.Columns {
 				c.ID = int64(i) + 1
 			}
