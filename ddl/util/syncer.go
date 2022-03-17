@@ -26,6 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/owner"
 	"github.com/pingcap/tidb/parser/terror"
@@ -38,12 +39,6 @@ import (
 )
 
 const (
-	// DDLAllSchemaVersions is the path on etcd that is used to store all servers current schema versions.
-	// It's exported for testing.
-	DDLAllSchemaVersions = "/tidb/ddl/all_schema_versions"
-	// DDLGlobalSchemaVersion is the path on etcd that is used to store the latest schema versions.
-	// It's exported for testing.
-	DDLGlobalSchemaVersion = "/tidb/ddl/global_schema_version"
 	// InitialVersion is the initial schema version for every server.
 	// It's exported for testing.
 	InitialVersion       = "0"
@@ -64,6 +59,13 @@ var (
 	// SyncerSessionTTL is the etcd session's TTL in seconds.
 	// and it's an exported variable for testing.
 	SyncerSessionTTL = 90
+
+	// DDLAllSchemaVersions is the path on etcd that is used to store all servers current schema versions.
+	// It's exported for testing.
+	DDLAllSchemaVersions = "/tidb/ddl/all_schema_versions"
+	// DDLGlobalSchemaVersion is the path on etcd that is used to store the latest schema versions.
+	// It's exported for testing.
+	DDLGlobalSchemaVersion = "/tidb/ddl/global_schema_version"
 )
 
 // SchemaSyncer is used to synchronize schema version between the DDL worker leader and followers through etcd.
@@ -122,6 +124,12 @@ type schemaVersionSyncer struct {
 // NewSchemaSyncer creates a new SchemaSyncer.
 func NewSchemaSyncer(ctx context.Context, etcdCli *clientv3.Client, id string, oc ownerChecker) SchemaSyncer {
 	childCtx, cancelFunc := context.WithCancel(ctx)
+	if config.GetGlobalConfig().Tenant.IsTenant {
+		DDLGlobalSchemaVersion = DDLGlobalSchemaVersion + "/" + strconv.FormatInt(int64(config.GetGlobalConfig().
+			Tenant.TenantId), 10)
+		DDLAllSchemaVersions = DDLAllSchemaVersions + "/" + strconv.FormatInt(int64(config.GetGlobalConfig().
+			Tenant.TenantId), 10)
+	}
 	return &schemaVersionSyncer{
 		etcdCli:                   etcdCli,
 		selfSchemaVerPath:         fmt.Sprintf("%s/%s", DDLAllSchemaVersions, id),

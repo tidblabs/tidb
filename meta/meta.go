@@ -41,6 +41,7 @@ import (
 var (
 	globalIDMutex sync.Mutex
 	policyIDMutex sync.Mutex
+	tableIDMutex  sync.Mutex
 )
 
 // Meta structure:
@@ -63,6 +64,7 @@ var (
 	mNextGlobalIDKey  = []byte("NextGlobalID")
 	mSchemaVersionKey = []byte("SchemaVersionKey")
 	mDBs              = []byte("DBs")
+	mNextTableIDKey   = []byte("Tables")
 	mDBPrefix         = "DB"
 	mTablePrefix      = "Table"
 	mSequencePrefix   = "SID"
@@ -128,6 +130,7 @@ func NewMeta(txn kv.Transaction, jobListKeys ...JobListKeyType) *Meta {
 	if len(jobListKeys) != 0 {
 		listKey = jobListKeys[0]
 	}
+
 	return &Meta{txn: t,
 		StartTS:    txn.StartTS(),
 		jobListKey: listKey,
@@ -176,6 +179,23 @@ func (m *Meta) GenPlacementPolicyID() (int64, error) {
 // GetGlobalID gets current global id.
 func (m *Meta) GetGlobalID() (int64, error) {
 	return m.txn.GetInt64(mNextGlobalIDKey)
+}
+
+// GenTableIDs generates the next n table IDs.
+func (m *Meta) GenTableIDs(n int) ([]int64, error) {
+	tableIDMutex.Lock()
+	defer tableIDMutex.Unlock()
+
+	newID, err := m.txn.Inc(mNextTableIDKey, int64(n))
+	if err != nil {
+		return nil, err
+	}
+	origID := newID - int64(n)
+	ids := make([]int64, 0, n)
+	for i := origID + 1; i <= newID; i++ {
+		ids = append(ids, i)
+	}
+	return ids, nil
 }
 
 // GetPolicyID gets current policy global id.
@@ -1230,4 +1250,16 @@ func (m *Meta) SetSchemaDiff(diff *model.SchemaDiff) error {
 	err = m.txn.Set(diffKey, data)
 	metrics.MetaHistogram.WithLabelValues(metrics.SetSchemaDiff, metrics.RetLabel(err)).Observe(time.Since(startTime).Seconds())
 	return errors.Trace(err)
+}
+
+// SetTenant appends tenantID for some keys
+func SetTenant(tenantID uint16) {
+	tenantIdStr := []byte(strconv.FormatInt(int64(tenantID), 10))
+	mNextGlobalIDKey = append(mNextGlobalIDKey, tenantIdStr...)
+	mSchemaVersionKey = append(mSchemaVersionKey, tenantIdStr...)
+	mDBs = append(mDBs, tenantIdStr...)
+	mBootstrapKey = append(mBootstrapKey, tenantIdStr...)
+	mPolicies = append(mPolicies, tenantIdStr...)
+	mPolicyGlobalID = append(mPolicyGlobalID, tenantIdStr...)
+	mNextTableIDKey = append(mNextTableIDKey, tenantIdStr...)
 }

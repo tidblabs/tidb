@@ -18,6 +18,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/pingcap/tidb/meta"
 	"io/fs"
 	"os"
 	"runtime"
@@ -200,6 +201,11 @@ func main() {
 	printInfo()
 	setupBinlogClient()
 	setupMetrics()
+
+	// Config meta information for tenant
+	if config.GetGlobalConfig().Tenant.IsTenant {
+		meta.SetTenant(config.GetGlobalConfig().Tenant.TenantId)
+	}
 
 	storage, dom := createStoreAndDomain()
 	svr := createServer(storage, dom)
@@ -620,7 +626,6 @@ func setGlobalVars() {
 		variable.SetSysVar(variable.Hostname, hostname)
 	}
 	variable.GlobalLogMaxDays.Store(int32(config.GetGlobalConfig().Log.File.MaxDays))
-
 	if cfg.Security.EnableSEM {
 		sem.Enable()
 	}

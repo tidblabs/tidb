@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -73,6 +74,10 @@ const (
 	DefStatsLoadQueueSizeLimit = 1
 	// DefMaxOfStatsLoadQueueSizeLimit is maximum limitation of the size of stats-load request queue
 	DefMaxOfStatsLoadQueueSizeLimit = 100000
+	// DefTiDBTenantId is the default tenant id of the TiDB instance
+	DefTiDBTenantId = 0
+	// BitsReserved4TenantTableId determines the number of bytes for table id in tenant mode
+	BitsReserved4TenantTableId = 48
 )
 
 // Valid config maps
@@ -198,7 +203,8 @@ type Config struct {
 	// one quarter of the total physical memory in the current system.
 	MaxBallastObjectSize int `toml:"max-ballast-object-size" json:"max-ballast-object-size"`
 	// BallastObjectSize set the initial size of the ballast object, the unit is byte.
-	BallastObjectSize int `toml:"ballast-object-size" json:"ballast-object-size"`
+	BallastObjectSize int    `toml:"ballast-object-size" json:"ballast-object-size"`
+	Tenant            Tenant `toml:"tenant" json:"tenant"`
 }
 
 // UpdateTempStoragePath is to update the `TempStoragePath` if port/statusPort was changed
@@ -602,6 +608,14 @@ type IsolationRead struct {
 	Engines []string `toml:"engines" json:"engines"`
 }
 
+// Tenant related configuration.
+type Tenant struct {
+	// Tenant mode is on or off
+	IsTenant bool `toml:"is-tenant" json:"is-tenant""`
+	// TenantId set the tenant id for the TiDB server
+	TenantId uint16 `toml:"tenant-id" json:"tenant-id"`
+}
+
 // Experimental controls the features that are still experimental: their semantics, interfaces are subject to change.
 // Using these features in the production environment is not recommended.
 type Experimental struct {
@@ -988,6 +1002,14 @@ func (c *Config) Valid() error {
 	}
 	if c.Performance.StatsLoadQueueSize < DefStatsLoadQueueSizeLimit || c.Performance.StatsLoadQueueSize > DefMaxOfStatsLoadQueueSizeLimit {
 		return fmt.Errorf("stats-load-queue-size should be [%d, %d]", DefStatsLoadQueueSizeLimit, DefMaxOfStatsLoadQueueSizeLimit)
+	}
+
+	// check tenant configuration
+	if !c.Tenant.IsTenant && c.Tenant.TenantId > DefTiDBTenantId {
+		return fmt.Errorf("conflict is-tenant and tenantid")
+	}
+	if c.Tenant.TenantId < DefTiDBTenantId || c.Tenant.TenantId > math.MaxUint16 {
+		return fmt.Errorf("tenantid should be [#{DefTiDBTenantId}, #{math.MaxUint16})")
 	}
 
 	// test log level
