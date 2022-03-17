@@ -82,6 +82,10 @@ const (
 	DefExpensiveQueryTimeThreshold = 60
 	// DefMemoryUsageAlarmRatio is the threshold triggering an alarm which the memory usage of tidb-server instance exceeds.
 	DefMemoryUsageAlarmRatio = 0.8
+	// DefTiDBTenantId is the default tenant id of the TiDB instance
+	DefTiDBTenantId = 0
+	// BitsReserved4TenantTableId determines the number of bytes for table id in tenant mode
+	BitsReserved4TenantTableId = 48
 )
 
 // Valid config maps
@@ -266,6 +270,7 @@ type Config struct {
 	EnableBatchDML bool   `toml:"enable-batch-dml" json:"enable-batch-dml"`
 	MemQuotaQuery  int64  `toml:"mem-quota-query" json:"mem-quota-query"`
 	OOMAction      string `toml:"oom-action" json:"oom-action"`
+	Tenant         Tenant `toml:"tenant" json:"tenant"`
 }
 
 // UpdateTempStoragePath is to update the `TempStoragePath` if port/statusPort was changed
@@ -741,6 +746,14 @@ type IsolationRead struct {
 	Engines []string `toml:"engines" json:"engines"`
 }
 
+// Tenant related configuration.
+type Tenant struct {
+	// Tenant mode is on or off
+	IsTenant bool `toml:"is-tenant" json:"is-tenant""`
+	// TenantId set the tenant id for the TiDB server
+	TenantId uint16 `toml:"tenant-id" json:"tenant-id"`
+}
+
 // Experimental controls the features that are still experimental: their semantics, interfaces are subject to change.
 // Using these features in the production environment is not recommended.
 type Experimental struct {
@@ -1160,6 +1173,14 @@ func (c *Config) Valid() error {
 	}
 	if c.Performance.StatsLoadQueueSize < DefStatsLoadQueueSizeLimit || c.Performance.StatsLoadQueueSize > DefMaxOfStatsLoadQueueSizeLimit {
 		return fmt.Errorf("stats-load-queue-size should be [%d, %d]", DefStatsLoadQueueSizeLimit, DefMaxOfStatsLoadQueueSizeLimit)
+	}
+
+	// check tenant configuration
+	if !c.Tenant.IsTenant && c.Tenant.TenantId > DefTiDBTenantId {
+		return fmt.Errorf("conflict is-tenant and tenantid")
+	}
+	if c.Tenant.TenantId < DefTiDBTenantId || c.Tenant.TenantId > math.MaxUint16 {
+		return fmt.Errorf("tenantid should be [#{DefTiDBTenantId}, #{math.MaxUint16})")
 	}
 
 	// test log level

@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -316,7 +317,12 @@ func newDDL(ctx context.Context, options ...Option) *ddl {
 		manager = owner.NewMockManager(ctx, id)
 		syncer = NewMockSchemaSyncer()
 	} else {
-		manager = owner.NewOwnerManager(ctx, etcdCli, ddlPrompt, id, DDLOwnerKey)
+		if config.GetGlobalConfig().Tenant.IsTenant {
+			manager = owner.NewOwnerManager(ctx, etcdCli, ddlPrompt, id, DDLOwnerKey+strconv.FormatInt(int64(config.GetGlobalConfig().Tenant.TenantId), 10))
+		} else {
+			manager = owner.NewOwnerManager(ctx, etcdCli, ddlPrompt, id, DDLOwnerKey)
+		}
+
 		syncer = util.NewSchemaSyncer(ctx, etcdCli, id, manager)
 		deadLockCkr = util.NewDeadTableLockChecker(etcdCli)
 	}
@@ -506,6 +512,24 @@ func (d *ddl) genPlacementPolicyID() (int64, error) {
 		m := meta.NewMeta(txn)
 		var err error
 		ret, err = m.GenPlacementPolicyID()
+		return err
+	})
+
+	return ret, err
+}
+
+func (d *ddl) genTableIDs(count int) ([]int64, error) {
+	var ret []int64
+	err := kv.RunInNewTxn(context.Background(), d.store, true, func(ctx context.Context, txn kv.Transaction) error {
+		failpoint.Inject("mockGenTableIDFail", func(val failpoint.Value) {
+			if val.(bool) {
+				failpoint.Return(errors.New("gofail genTableIDs error"))
+			}
+		})
+
+		m := meta.NewMeta(txn)
+		var err error
+		ret, err = m.GenTableIDs(count)
 		return err
 	})
 

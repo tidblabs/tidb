@@ -135,6 +135,7 @@ func (d *ddl) CreateSchemaWithInfo(
 	if err != nil {
 		return errors.Trace(err)
 	}
+
 	dbInfo.ID = genIDs[0]
 
 	job := &model.Job{
@@ -2154,11 +2155,28 @@ func buildTableInfoWithStmt(ctx sessionctx.Context, s *ast.CreateTableStmt, dbCh
 }
 
 func (d *ddl) assignTableID(tbInfo *model.TableInfo) error {
-	genIDs, err := d.genGlobalIDs(1)
+	var genIDs []int64
+	var err error
+
+	if config.GetGlobalConfig().Tenant.IsTenant {
+		genIDs, err = d.genTableIDs(1)
+	} else {
+		genIDs, err = d.genGlobalIDs(1)
+	}
+
 	if err != nil {
 		return errors.Trace(err)
 	}
-	tbInfo.ID = genIDs[0]
+
+	if config.GetGlobalConfig().Tenant.IsTenant && genIDs[0] >= 1<<config.BitsReserved4TenantTableId {
+		return errors.Trace(errors.New("table id for current tenant overflows"))
+	}
+
+	if config.GetGlobalConfig().Tenant.IsTenant {
+		tbInfo.ID = genIDs[0] + int64(config.GetGlobalConfig().Tenant.TenantId)<<config.BitsReserved4TenantTableId
+	} else {
+		tbInfo.ID = genIDs[0]
+	}
 	return nil
 }
 

@@ -19,6 +19,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/ddl/placement"
 	"github.com/pingcap/tidb/meta/autoid"
 	"github.com/pingcap/tidb/parser/model"
@@ -327,17 +328,23 @@ func GetSequenceByName(is InfoSchema, schema, sequence model.CIStr) (util.Sequen
 }
 
 func init() {
-	// Initialize the information shema database and register the driver to `drivers`
+	// Initialize the information schema database and register the driver to `drivers`
 	dbID := autoid.InformationSchemaDBID
 	infoSchemaTables := make([]*model.TableInfo, 0, len(tableNameToColumns))
 	for name, cols := range tableNameToColumns {
 		tableInfo := buildTableMeta(name, cols)
 		infoSchemaTables = append(infoSchemaTables, tableInfo)
 		var ok bool
-		tableInfo.ID, ok = tableIDMap[tableInfo.Name.O]
+		_, ok = tableIDMap[tableInfo.Name.O]
 		if !ok {
 			panic(fmt.Sprintf("get information_schema table id failed, unknown system table `%v`", tableInfo.Name.O))
 		}
+
+		if config.GetGlobalConfig().Tenant.IsTenant {
+			tableIDMap[tableInfo.Name.O] += int64(config.GetGlobalConfig().Tenant.TenantId) << config.BitsReserved4TenantTableId
+		}
+
+		tableInfo.ID = tableIDMap[tableInfo.Name.O]
 		for i, c := range tableInfo.Columns {
 			c.ID = int64(i) + 1
 		}
