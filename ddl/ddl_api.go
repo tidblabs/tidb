@@ -131,12 +131,22 @@ func (d *ddl) CreateSchemaWithInfo(
 	}
 
 	// FIXME: support `tryRetainID`.
-	genIDs, err := d.genGlobalIDs(1)
+	var genIDs []int64
+	var err error
+	if config.GetGlobalConfig().Tenant.IsTenant {
+		genIDs, err = d.genObjectIDs(1)
+	} else {
+		genIDs, err = d.genGlobalIDs(1)
+	}
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	dbInfo.ID = genIDs[0]
+	if config.GetGlobalConfig().Tenant.IsTenant && genIDs[0] >= 1<<config.BitsReserved4TenantTableId {
+		return errors.Trace(errors.New("schema id for current tenant overflows"))
+	}
+
+	dbInfo.ID = genIDs[0] + int64(config.GetGlobalConfig().Tenant.TenantId)<<config.BitsReserved4TenantTableId
 
 	job := &model.Job{
 		SchemaID:   dbInfo.ID,
@@ -2159,7 +2169,7 @@ func (d *ddl) assignTableID(tbInfo *model.TableInfo) error {
 	var err error
 
 	if config.GetGlobalConfig().Tenant.IsTenant {
-		genIDs, err = d.genTableIDs(1)
+		genIDs, err = d.genObjectIDs(1)
 	} else {
 		genIDs, err = d.genGlobalIDs(1)
 	}

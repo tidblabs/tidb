@@ -518,18 +518,18 @@ func (d *ddl) genPlacementPolicyID() (int64, error) {
 	return ret, err
 }
 
-func (d *ddl) genTableIDs(count int) ([]int64, error) {
+func (d *ddl) genObjectIDs(count int) ([]int64, error) {
 	var ret []int64
 	err := kv.RunInNewTxn(context.Background(), d.store, true, func(ctx context.Context, txn kv.Transaction) error {
-		failpoint.Inject("mockGenTableIDFail", func(val failpoint.Value) {
+		failpoint.Inject("mockGenObjectIDFail", func(val failpoint.Value) {
 			if val.(bool) {
-				failpoint.Return(errors.New("gofail genTableIDs error"))
+				failpoint.Return(errors.New("gofail genObjectIDs error"))
 			}
 		})
 
 		m := meta.NewMeta(txn)
 		var err error
-		ret, err = m.GenTableIDs(count)
+		ret, err = m.GenObjectIDs(count)
 		return err
 	})
 

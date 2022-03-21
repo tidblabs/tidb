@@ -64,7 +64,7 @@ var (
 	mNextGlobalIDKey  = []byte("NextGlobalID")
 	mSchemaVersionKey = []byte("SchemaVersionKey")
 	mDBs              = []byte("DBs")
-	mNextTableIDKey   = []byte("Tables")
+	mNextObjectIDKey  = []byte("Objects")
 	mDBPrefix         = "DB"
 	mTablePrefix      = "Table"
 	mSequencePrefix   = "SID"
@@ -182,12 +182,12 @@ func (m *Meta) GetGlobalID() (int64, error) {
 	return m.txn.GetInt64(mNextGlobalIDKey)
 }
 
-// GenTableIDs generates the next n table IDs.
-func (m *Meta) GenTableIDs(n int) ([]int64, error) {
+// GenObjectIDs generates the next n object (schema or table) IDs.
+func (m *Meta) GenObjectIDs(n int) ([]int64, error) {
 	tableIDMutex.Lock()
 	defer tableIDMutex.Unlock()
 
-	newID, err := m.txn.Inc(mNextTableIDKey, int64(n))
+	newID, err := m.txn.Inc(mNextObjectIDKey, int64(n))
 	if err != nil {
 		return nil, err
 	}
@@ -1372,5 +1372,5 @@ func SetTenant(tenantID uint16) {
 	mBootstrapKey = append(mBootstrapKey, tenantIdStr...)
 	mPolicies = append(mPolicies, tenantIdStr...)
 	mPolicyGlobalID = append(mPolicyGlobalID, tenantIdStr...)
-	mNextTableIDKey = append(mNextTableIDKey, tenantIdStr...)
+	mNextObjectIDKey = append(mNextObjectIDKey, tenantIdStr...)
 }
