@@ -83,7 +83,7 @@ const (
 	// DefMemoryUsageAlarmRatio is the threshold triggering an alarm which the memory usage of tidb-server instance exceeds.
 	DefMemoryUsageAlarmRatio = 0.8
 	// DefTiDBTenantId is the default tenant id of the TiDB instance
-	DefTiDBTenantId = 0
+	DefTiDBTenantId = 1
 	// BitsReserved4TenantTableId determines the number of bytes for table id in tenant mode
 	BitsReserved4TenantTableId = 48
 )
@@ -1175,12 +1175,12 @@ func (c *Config) Valid() error {
 		return fmt.Errorf("stats-load-queue-size should be [%d, %d]", DefStatsLoadQueueSizeLimit, DefMaxOfStatsLoadQueueSizeLimit)
 	}
 
-	// check tenant configuration
-	if !c.Tenant.IsTenant && c.Tenant.TenantId > DefTiDBTenantId {
-		return fmt.Errorf("conflict is-tenant and tenantid")
+	// validate tenant-related configuration
+	if !c.Tenant.IsTenant && c.Tenant.TenantId >= DefTiDBTenantId {
+		return fmt.Errorf("is-tenant should be turned on when none zero tenant-id is specified")
 	}
-	if c.Tenant.TenantId < DefTiDBTenantId || c.Tenant.TenantId > math.MaxUint16 {
-		return fmt.Errorf("tenantid should be [#{DefTiDBTenantId}, #{math.MaxUint16})")
+	if c.Tenant.IsTenant && (c.Tenant.TenantId < DefTiDBTenantId || c.Tenant.TenantId > math.MaxUint16) {
+		return fmt.Errorf("tenantid should be [%d, %d)", DefTiDBTenantId, math.MaxUint16)
 	}
 
 	// test log level

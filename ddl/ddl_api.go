@@ -142,11 +142,14 @@ func (d *ddl) CreateSchemaWithInfo(
 		return errors.Trace(err)
 	}
 
-	if config.GetGlobalConfig().Tenant.IsTenant && genIDs[0] >= 1<<config.BitsReserved4TenantTableId {
-		return errors.Trace(errors.New("schema id for current tenant overflows"))
+	if config.GetGlobalConfig().Tenant.IsTenant {
+		if genIDs[0] >= 1<<config.BitsReserved4TenantTableId {
+			return errors.Trace(errors.New("schema id for current tenant overflows"))
+		}
+		dbInfo.ID = genIDs[0] + int64(config.GetGlobalConfig().Tenant.TenantId)<<config.BitsReserved4TenantTableId
+	} else {
+		dbInfo.ID = genIDs[0]
 	}
-
-	dbInfo.ID = genIDs[0] + int64(config.GetGlobalConfig().Tenant.TenantId)<<config.BitsReserved4TenantTableId
 
 	job := &model.Job{
 		SchemaID:   dbInfo.ID,
@@ -2178,11 +2181,10 @@ func (d *ddl) assignTableID(tbInfo *model.TableInfo) error {
 		return errors.Trace(err)
 	}
 
-	if config.GetGlobalConfig().Tenant.IsTenant && genIDs[0] >= 1<<config.BitsReserved4TenantTableId {
-		return errors.Trace(errors.New("table id for current tenant overflows"))
-	}
-
 	if config.GetGlobalConfig().Tenant.IsTenant {
+		if genIDs[0] >= 1<<config.BitsReserved4TenantTableId {
+			return errors.Trace(errors.New("table id for current tenant overflows"))
+		}
 		tbInfo.ID = genIDs[0] + int64(config.GetGlobalConfig().Tenant.TenantId)<<config.BitsReserved4TenantTableId
 	} else {
 		tbInfo.ID = genIDs[0]
