@@ -17,7 +17,6 @@ package infoschema
 import (
 	"bytes"
 	"fmt"
-	"github.com/pingcap/tidb/config"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,14 +38,9 @@ const (
 )
 
 func init() {
-	var tableID int64
 	// Initialize the metric schema database and register the driver to `drivers`.
 	dbID := autoid.MetricSchemaDBID
-	if config.GetGlobalConfig().Tenant.IsTenant {
-		tableID = dbID + 1 + int64(config.GetGlobalConfig().Tenant.TenantId)<<config.BitsReserved4TenantTableId
-	} else {
-		tableID = dbID + 1
-	}
+	tableID := dbID + 1
 	metricTables := make([]*model.TableInfo, 0, len(MetricTableMap))
 	for name, def := range MetricTableMap {
 		cols := def.genColumnInfos()
