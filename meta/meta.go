@@ -78,6 +78,28 @@ var (
 	mPolicyPrefix     = "Policy"
 	mPolicyGlobalID   = []byte("PolicyGlobalID")
 	mPolicyMagicByte  = CurrentMagicByteVer
+
+	// BindInfoOwnerKey is the bindinfo owner path that is saved to etcd.
+	BindInfoOwnerKey = "/tidb/bindinfo/owner"
+
+	PrivilegeKey   = "/tidb/privilege"
+	SysVarCacheKey = "/tidb/sysvars"
+
+	// DDLOwnerKey is the ddl owner path that is saved to etcd, and it's exported for testing.
+	DDLOwnerKey = "/tidb/ddl/fg/owner"
+	// AddingDDLJobPrefix is the path prefix used to record the newly added DDL job, and it's saved to etcd.
+	AddingDDLJobPrefix = "/tidb/ddl/add_ddl_job_"
+	// DDLAllSchemaVersions is the path on etcd that is used to store all servers current schema versions.
+	// It's exported for testing.
+	DDLAllSchemaVersions = "/tidb/ddl/all_schema_versions"
+	// DDLGlobalSchemaVersion is the path on etcd that is used to store the latest schema versions.
+	// It's exported for testing.
+	DDLGlobalSchemaVersion = "/tidb/ddl/global_schema_version"
+
+	// TopologyInformationPath means etcd path for storing topology info.
+	TopologyInformationPath = "/topology/tidb"
+	// TrackingIDKey is a random tracking for the cluster that is saved to etcd. Tracking ID can be reset by user.
+	TrackingIDKey = "/tidb/telemetry/tracking_id"
 )
 
 const (
@@ -1252,14 +1274,29 @@ func (m *Meta) SetSchemaDiff(diff *model.SchemaDiff) error {
 	return errors.Trace(err)
 }
 
-// SetTenant appends tenantID for some keys
+// SetTenant appends tenantID for some keys and etcd paths
 func SetTenant(tenantID uint16) {
-	tenantIdStr := []byte(strconv.FormatInt(int64(tenantID), 10))
-	mNextGlobalIDKey = append(mNextGlobalIDKey, tenantIdStr...)
-	mSchemaVersionKey = append(mSchemaVersionKey, tenantIdStr...)
-	mDBs = append(mDBs, tenantIdStr...)
-	mBootstrapKey = append(mBootstrapKey, tenantIdStr...)
-	mPolicies = append(mPolicies, tenantIdStr...)
-	mPolicyGlobalID = append(mPolicyGlobalID, tenantIdStr...)
-	mNextObjectIDKey = append(mNextObjectIDKey, tenantIdStr...)
+	tenantIdStr := strconv.FormatInt(int64(tenantID), 10)
+	tenantIdStrBytes := []byte(tenantIdStr)
+
+	// Append tenant ID to sensitive keys
+	mNextGlobalIDKey = append(mNextGlobalIDKey, tenantIdStrBytes...)
+	mSchemaVersionKey = append(mSchemaVersionKey, tenantIdStrBytes...)
+	mDBs = append(mDBs, tenantIdStrBytes...)
+	mBootstrapKey = append(mBootstrapKey, tenantIdStrBytes...)
+	mPolicies = append(mPolicies, tenantIdStrBytes...)
+	mPolicyGlobalID = append(mPolicyGlobalID, tenantIdStrBytes...)
+	mNextObjectIDKey = append(mNextObjectIDKey, tenantIdStrBytes...)
+
+	// Append tenant ID to sensitive etcd paths for bindinfo, privilege, sysvar, ddl, topology and telemetry
+	BindInfoOwnerKey = BindInfoOwnerKey + "/" + tenantIdStr
+	PrivilegeKey = PrivilegeKey + "/" + tenantIdStr
+	SysVarCacheKey = SysVarCacheKey + "/" + tenantIdStr
+	mSchemaDiffPrefix = mSchemaDiffPrefix + "/" + tenantIdStr
+	DDLOwnerKey = DDLOwnerKey + "/" + tenantIdStr
+	AddingDDLJobPrefix = AddingDDLJobPrefix + "/" + tenantIdStr
+	DDLAllSchemaVersions = DDLAllSchemaVersions + "/" + tenantIdStr
+	DDLGlobalSchemaVersion = DDLGlobalSchemaVersion + "/" + tenantIdStr
+	TopologyInformationPath = TopologyInformationPath + "/" + tenantIdStr
+	TrackingIDKey = TrackingIDKey + "/" + tenantIdStr
 }

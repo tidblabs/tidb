@@ -16,15 +16,11 @@ package telemetry
 
 import (
 	"context"
+	"github.com/pingcap/tidb/meta"
 
 	"github.com/google/uuid"
 	"github.com/pingcap/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
-)
-
-const (
-	// trackingIDKey is a random tracking for the cluster that is saved to etcd. Tracking ID can be reset by user.
-	trackingIDKey = "/tidb/telemetry/tracking_id"
 )
 
 // ResetTrackingID generates a new tracking ID.
@@ -35,7 +31,7 @@ func ResetTrackingID(etcdClient *clientv3.Client) (string, error) {
 	id := uuid.New().String()
 	ctx, cancel := context.WithTimeout(context.Background(), etcdOpTimeout)
 	defer cancel()
-	_, err := etcdClient.Put(ctx, trackingIDKey, id)
+	_, err := etcdClient.Put(ctx, meta.TrackingIDKey, id)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
@@ -50,7 +46,7 @@ func GetTrackingID(etcdClient *clientv3.Client) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), etcdOpTimeout)
 	defer cancel()
-	resp, err := etcdClient.Get(ctx, trackingIDKey)
+	resp, err := etcdClient.Get(ctx, meta.TrackingIDKey)
 	if err != nil {
 		return "", errors.Trace(err)
 	}

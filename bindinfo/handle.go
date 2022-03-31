@@ -90,8 +90,6 @@ type BindHandle struct {
 var Lease = 3 * time.Second
 
 const (
-	// OwnerKey is the bindinfo owner path that is saved to etcd.
-	OwnerKey = "/tidb/bindinfo/owner"
 	// Prompt is the prompt for bindinfo owner manager.
 	Prompt = "bindinfo"
 	// BuiltinPseudoSQL4BindLock is used to simulate LOCK TABLE for mysql.bind_info.

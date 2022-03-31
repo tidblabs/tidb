@@ -16,6 +16,7 @@ package util
 
 import (
 	"context"
+	"github.com/pingcap/tidb/meta"
 	"strings"
 	"time"
 
@@ -56,7 +57,7 @@ func (d *DeadTableLockChecker) getAliveServers(ctx context.Context) (map[string]
 		default:
 		}
 		childCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
-		resp, err = d.etcdCli.Get(childCtx, DDLAllSchemaVersions, clientv3.WithPrefix())
+		resp, err = d.etcdCli.Get(childCtx, meta.DDLAllSchemaVersions, clientv3.WithPrefix())
 		cancel()
 		if err != nil {
 			logutil.BgLogger().Info("[ddl] clean dead table lock get alive servers failed.", zap.Error(err))
@@ -64,7 +65,7 @@ func (d *DeadTableLockChecker) getAliveServers(ctx context.Context) (map[string]
 			continue
 		}
 		for _, kv := range resp.Kvs {
-			serverID := strings.TrimPrefix(string(kv.Key), DDLAllSchemaVersions+"/")
+			serverID := strings.TrimPrefix(string(kv.Key), meta.DDLAllSchemaVersions+"/")
 			allInfos[serverID] = struct{}{}
 		}
 		return allInfos, nil
