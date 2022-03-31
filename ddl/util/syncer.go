@@ -26,7 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/terror"
 	tidbutil "github.com/pingcap/tidb/util"
@@ -58,13 +58,6 @@ var (
 	// SyncerSessionTTL is the etcd session's TTL in seconds.
 	// and it's an exported variable for testing.
 	SyncerSessionTTL = 90
-
-	// DDLAllSchemaVersions is the path on etcd that is used to store all servers current schema versions.
-	// It's exported for testing.
-	DDLAllSchemaVersions = "/tidb/ddl/all_schema_versions"
-	// DDLGlobalSchemaVersion is the path on etcd that is used to store the latest schema versions.
-	// It's exported for testing.
-	DDLGlobalSchemaVersion = "/tidb/ddl/global_schema_version"
 )
 
 // SchemaSyncer is used to synchronize schema version between the DDL worker leader and followers through etcd.
@@ -123,15 +116,9 @@ type schemaVersionSyncer struct {
 // NewSchemaSyncer creates a new SchemaSyncer.
 func NewSchemaSyncer(ctx context.Context, etcdCli *clientv3.Client, id string, oc ownerChecker) SchemaSyncer {
 	childCtx, cancelFunc := context.WithCancel(ctx)
-	if config.GetGlobalConfig().Tenant.IsTenant {
-		DDLGlobalSchemaVersion = DDLGlobalSchemaVersion + "/" + strconv.FormatInt(int64(config.GetGlobalConfig().
-			Tenant.TenantId), 10)
-		DDLAllSchemaVersions = DDLAllSchemaVersions + "/" + strconv.FormatInt(int64(config.GetGlobalConfig().
-			Tenant.TenantId), 10)
-	}
 	return &schemaVersionSyncer{
 		etcdCli:                   etcdCli,
-		selfSchemaVerPath:         fmt.Sprintf("%s/%s", DDLAllSchemaVersions, id),
+		selfSchemaVerPath:         fmt.Sprintf("%s/%s", meta.DDLAllSchemaVersions, id),
 		ownerChecker:              oc,
 		notifyCleanExpiredPathsCh: make(chan struct{}, 1),
 		ctx:                       childCtx,
@@ -172,8 +159,8 @@ func (s *schemaVersionSyncer) Init(ctx context.Context) error {
 	}()
 
 	_, err = s.etcdCli.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(DDLGlobalSchemaVersion), "=", 0)).
-		Then(clientv3.OpPut(DDLGlobalSchemaVersion, InitialVersion)).
+		If(clientv3.Compare(clientv3.CreateRevision(meta.DDLGlobalSchemaVersion), "=", 0)).
+		Then(clientv3.OpPut(meta.DDLGlobalSchemaVersion, InitialVersion)).
 		Commit()
 	if err != nil {
 		return errors.Trace(err)
@@ -186,7 +173,7 @@ func (s *schemaVersionSyncer) Init(ctx context.Context) error {
 	s.storeSession(session)
 
 	s.mu.Lock()
-	s.mu.globalVerCh = s.etcdCli.Watch(ctx, DDLGlobalSchemaVersion)
+	s.mu.globalVerCh = s.etcdCli.Watch(ctx, meta.DDLGlobalSchemaVersion)
 	s.mu.Unlock()
 
 	err = PutKVToEtcd(ctx, s.etcdCli, keyOpDefaultRetryCnt, s.selfSchemaVerPath, InitialVersion,
@@ -257,7 +244,7 @@ func (s *schemaVersionSyncer) WatchGlobalSchemaVer(ctx context.Context) {
 		defer func() {
 			metrics.DeploySyncerHistogram.WithLabelValues(metrics.SyncerRewatch, metrics.RetLabel(nil)).Observe(time.Since(startTime).Seconds())
 		}()
-		ch := s.etcdCli.Watch(ctx, DDLGlobalSchemaVersion)
+		ch := s.etcdCli.Watch(ctx, meta.DDLGlobalSchemaVersion)
 
 		s.mu.Lock()
 		s.mu.globalVerCh = ch
@@ -283,7 +270,7 @@ func (s *schemaVersionSyncer) OwnerUpdateGlobalVersion(ctx context.Context, vers
 	ver := strconv.FormatInt(version, 10)
 	// TODO: If the version is larger than the original global version, we need set the version.
 	// Otherwise, we'd better set the original global version.
-	err := PutKVToEtcd(ctx, s.etcdCli, putKeyRetryUnlimited, DDLGlobalSchemaVersion, ver)
+	err := PutKVToEtcd(ctx, s.etcdCli, putKeyRetryUnlimited, meta.DDLGlobalSchemaVersion, ver)
 	metrics.OwnerHandleSyncerHistogram.WithLabelValues(metrics.OwnerUpdateGlobalVersion, metrics.RetLabel(err)).Observe(time.Since(startTime).Seconds())
 	return errors.Trace(err)
 }
@@ -344,7 +331,7 @@ func (s *schemaVersionSyncer) MustGetGlobalVersion(ctx context.Context) (int64, 
 			return 0, err
 		}
 
-		resp, err = s.etcdCli.Get(ctx, DDLGlobalSchemaVersion)
+		resp, err = s.etcdCli.Get(ctx, meta.DDLGlobalSchemaVersion)
 		if err != nil {
 			continue
 		}
@@ -385,7 +372,7 @@ func (s *schemaVersionSyncer) OwnerCheckAllVersions(ctx context.Context, latestV
 			return err
 		}
 
-		resp, err := s.etcdCli.Get(ctx, DDLAllSchemaVersions, clientv3.WithPrefix())
+		resp, err := s.etcdCli.Get(ctx, meta.DDLAllSchemaVersions, clientv3.WithPrefix())
 		if err != nil {
 			logutil.BgLogger().Info("[ddl] syncer check all versions failed, continue checking.", zap.Error(err))
 			continue

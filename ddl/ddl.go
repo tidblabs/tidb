@@ -24,7 +24,6 @@ import (
 	"flag"
 	"fmt"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -61,11 +60,8 @@ import (
 const (
 	// currentVersion is for all new DDL jobs.
 	currentVersion = 1
-	// DDLOwnerKey is the ddl owner path that is saved to etcd, and it's exported for testing.
-	DDLOwnerKey = "/tidb/ddl/fg/owner"
-	// addingDDLJobPrefix is the path prefix used to record the newly added DDL job, and it's saved to etcd.
-	addingDDLJobPrefix = "/tidb/ddl/add_ddl_job_"
-	ddlPrompt          = "ddl"
+
+	ddlPrompt = "ddl"
 
 	shardRowIDBitsMax = 15
 
@@ -317,11 +313,7 @@ func newDDL(ctx context.Context, options ...Option) *ddl {
 		manager = owner.NewMockManager(ctx, id)
 		syncer = NewMockSchemaSyncer()
 	} else {
-		if config.GetGlobalConfig().Tenant.IsTenant {
-			manager = owner.NewOwnerManager(ctx, etcdCli, ddlPrompt, id, DDLOwnerKey+strconv.FormatInt(int64(config.GetGlobalConfig().Tenant.TenantId), 10))
-		} else {
-			manager = owner.NewOwnerManager(ctx, etcdCli, ddlPrompt, id, DDLOwnerKey)
-		}
+		manager = owner.NewOwnerManager(ctx, etcdCli, ddlPrompt, id, meta.DDLOwnerKey)
 
 		syncer = util.NewSchemaSyncer(ctx, etcdCli, id, manager)
 		deadLockCkr = util.NewDeadTableLockChecker(etcdCli)

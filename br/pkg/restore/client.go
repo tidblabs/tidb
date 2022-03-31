@@ -1982,7 +1982,7 @@ func (rc *Client) UpdateSchemaVersion(ctx context.Context) error {
 		ctx,
 		rc.GetDomain().GetEtcdClient(),
 		math.MaxInt,
-		ddlutil.DDLGlobalSchemaVersion,
+		meta.DDLGlobalSchemaVersion,
 		ver,
 	); err != nil {
 		return errors.Annotatef(err, "failed to put global schema verson %v to etcd", ver)

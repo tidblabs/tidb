@@ -985,7 +985,7 @@ func (do *Domain) LoadPrivilegeLoop(ctx sessionctx.Context) error {
 	var watchCh clientv3.WatchChan
 	duration := 5 * time.Minute
 	if do.etcdClient != nil {
-		watchCh = do.etcdClient.Watch(context.Background(), privilegeKey)
+		watchCh = do.etcdClient.Watch(context.Background(), meta.PrivilegeKey)
 		duration = 10 * time.Minute
 	}
 
@@ -1007,7 +1007,7 @@ func (do *Domain) LoadPrivilegeLoop(ctx sessionctx.Context) error {
 			}
 			if !ok {
 				logutil.BgLogger().Error("load privilege loop watch channel closed")
-				watchCh = do.etcdClient.Watch(context.Background(), privilegeKey)
+				watchCh = do.etcdClient.Watch(context.Background(), meta.PrivilegeKey)
 				count++
 				if count > 10 {
 					time.Sleep(time.Duration(count) * time.Second)
@@ -1037,7 +1037,7 @@ func (do *Domain) LoadSysVarCacheLoop(ctx sessionctx.Context) error {
 	var watchCh clientv3.WatchChan
 	duration := 30 * time.Second
 	if do.etcdClient != nil {
-		watchCh = do.etcdClient.Watch(context.Background(), sysVarCacheKey)
+		watchCh = do.etcdClient.Watch(context.Background(), meta.SysVarCacheKey)
 	}
 	do.wg.Add(1)
 	go func() {
@@ -1070,7 +1070,7 @@ func (do *Domain) LoadSysVarCacheLoop(ctx sessionctx.Context) error {
 
 			if !ok {
 				logutil.BgLogger().Error("LoadSysVarCacheLoop loop watch channel closed")
-				watchCh = do.etcdClient.Watch(context.Background(), sysVarCacheKey)
+				watchCh = do.etcdClient.Watch(context.Background(), meta.SysVarCacheKey)
 				count++
 				if count > 10 {
 					time.Sleep(time.Duration(count) * time.Second)
@@ -1110,7 +1110,10 @@ func (do *Domain) LoadBindInfoLoop(ctxForHandle sessionctx.Context, ctxForEvolve
 		return err
 	}
 
-	owner := do.newOwnerManager(bindinfo.Prompt, bindinfo.OwnerKey)
+	var owner owner.Manager
+
+	owner = do.newOwnerManager(bindinfo.Prompt, meta.BindInfoOwnerKey)
+
 	do.globalBindHandleWorkerLoop(owner)
 	do.handleEvolvePlanTasksLoop(ctxForEvolve, owner)
 	return nil
@@ -1545,11 +1548,6 @@ func (do *Domain) ExpensiveQueryHandle() *expensivequery.Handle {
 	return do.expensiveQueryHandle
 }
 
-const (
-	privilegeKey   = "/tidb/privilege"
-	sysVarCacheKey = "/tidb/sysvars"
-)
-
 // NotifyUpdatePrivilege updates privilege key in etcd, TiDB client that watches
 // the key will get notification.
 func (do *Domain) NotifyUpdatePrivilege() error {
@@ -1558,7 +1556,7 @@ func (do *Domain) NotifyUpdatePrivilege() error {
 	// password using a special TiDB instance and want the new password to take effect.
 	if do.etcdClient != nil {
 		row := do.etcdClient.KV
-		_, err := row.Put(context.Background(), privilegeKey, "")
+		_, err := row.Put(context.Background(), meta.PrivilegeKey, "")
 		if err != nil {
 			logutil.BgLogger().Warn("notify update privilege failed", zap.Error(err))
 		}
@@ -1587,7 +1585,7 @@ func (do *Domain) NotifyUpdatePrivilege() error {
 func (do *Domain) NotifyUpdateSysVarCache() {
 	if do.etcdClient != nil {
 		row := do.etcdClient.KV
-		_, err := row.Put(context.Background(), sysVarCacheKey, "")
+		_, err := row.Put(context.Background(), meta.SysVarCacheKey, "")
 		if err != nil {
 			logutil.BgLogger().Warn("notify update sysvar cache failed", zap.Error(err))
 		}

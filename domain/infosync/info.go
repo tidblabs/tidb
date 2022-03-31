@@ -28,6 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/tidb/meta"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/config"
@@ -71,8 +73,6 @@ const (
 	InfoSessionTTL = 10 * 60
 	// ReportInterval is interval of infoSyncerKeeper reporting min startTS.
 	ReportInterval = 30 * time.Second
-	// TopologyInformationPath means etcd path for storing topology info.
-	TopologyInformationPath = "/topology/tidb"
 	// TopologySessionTTL is ttl for topology, ant it's the ETCD session's TTL in seconds.
 	TopologySessionTTL = 45
 	// TopologyTimeToRefresh means time to refresh etcd.
@@ -586,7 +586,7 @@ func (is *InfoSyncer) StoreTopologyInfo(ctx context.Context) error {
 		return errors.Trace(err)
 	}
 	str := string(hack.String(infoBuf))
-	key := fmt.Sprintf("%s/%s:%v/info", TopologyInformationPath, is.info.IP, is.info.Port)
+	key := fmt.Sprintf("%s/%s:%v/info", meta.TopologyInformationPath, is.info.IP, is.info.Port)
 	// Note: no lease is required here.
 	err = util.PutKVToEtcd(ctx, is.etcdCli, keyOpDefaultRetryCnt, key, str)
 	if err != nil {
@@ -696,7 +696,7 @@ func (is *InfoSyncer) RestartTopology(ctx context.Context) error {
 // GetAllTiDBTopology gets all tidb topology
 func (is *InfoSyncer) GetAllTiDBTopology(ctx context.Context) ([]*TopologyInfo, error) {
 	topos := make([]*TopologyInfo, 0)
-	response, err := is.etcdCli.Get(ctx, TopologyInformationPath, clientv3.WithPrefix())
+	response, err := is.etcdCli.Get(ctx, meta.TopologyInformationPath, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -738,7 +738,7 @@ func (is *InfoSyncer) newTopologySessionAndStoreServerInfo(ctx context.Context, 
 	if is.etcdCli == nil {
 		return nil
 	}
-	logPrefix := fmt.Sprintf("[topology-syncer] %s/%s:%d", TopologyInformationPath, is.info.IP, is.info.Port)
+	logPrefix := fmt.Sprintf("[topology-syncer] %s/%s:%d", meta.TopologyInformationPath, is.info.IP, is.info.Port)
 	session, err := util2.NewSession(ctx, logPrefix, is.etcdCli, retryCnt, TopologySessionTTL)
 	if err != nil {
 		return err
@@ -753,7 +753,7 @@ func (is *InfoSyncer) updateTopologyAliveness(ctx context.Context) error {
 	if is.etcdCli == nil {
 		return nil
 	}
-	key := fmt.Sprintf("%s/%s:%v/ttl", TopologyInformationPath, is.info.IP, is.info.Port)
+	key := fmt.Sprintf("%s/%s:%v/ttl", meta.TopologyInformationPath, is.info.IP, is.info.Port)
 	return util.PutKVToEtcd(ctx, is.etcdCli, keyOpDefaultRetryCnt, key,
 		fmt.Sprintf("%v", time.Now().UnixNano()),
 		clientv3.WithLease(is.topologySession.Lease()))

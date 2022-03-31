@@ -131,7 +131,7 @@ func newWorker(ctx context.Context, tp workerType, sessPool *sessionPool, delRan
 		delRangeManager: delRangeMgr,
 	}
 
-	worker.addingDDLJobKey = addingDDLJobPrefix + worker.typeStr()
+	worker.addingDDLJobKey = meta.AddingDDLJobPrefix + worker.typeStr()
 	worker.logCtx = logutil.WithKeyValue(context.Background(), "worker", worker.String())
 	return worker
 }
