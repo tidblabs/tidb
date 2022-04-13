@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/tidb/store/gcworker"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/tikv/client-go/v2/config"
+	"github.com/tikv/client-go/v2/keyspace/tenantcost"
 	"github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/tikvrpc"
 	"github.com/tikv/client-go/v2/util"
@@ -182,6 +183,29 @@ func (d TiKVDriver) OpenWithOptions(path string, options ...Option) (kv.Storage,
 
 	mc.cache[uuid] = store
 	return store, nil
+}
+
+// IsTiKVStore checks whether or not store is a tikv store.
+func IsTiKVStorage(s kv.Storage) bool {
+	_, ok := s.(*tikvStore)
+	return ok
+}
+
+// SetUpTenantContorller sets up tenant controller.
+func SetUpTenantContorller(tenantID uint64, s kv.Storage, id string) error {
+	var store *tikvStore
+	var ok = false
+	if store, ok = s.(*tikvStore); !ok {
+		errors.New("invalid storage")
+	}
+	tenantKVControllor, err := tenantcost.NewTenantSideCostController(tenantID, store.GetPDClient())
+	if err != nil {
+		return err
+	}
+	// TODO: fix me
+	tenantKVControllor.Start(context.Background(), id)
+	tikv.SetUpTenantInterceptor(tenantKVControllor)
+	return nil
 }
 
 type tikvStore struct {

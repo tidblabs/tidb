@@ -159,3 +159,7 @@ func (c *pdClient) GetRegionFromMember(ctx context.Context, key []byte, memberUR
 func (c *pdClient) UpdateOption(option pd.DynamicOption, value interface{}) error {
 	return nil
 }
+
+func (c *pdClient) TokenBucket(ctx context.Context, req *pdpb.TokenBucketRequest) (*pdpb.TokenBucketResponse, error) {
+	return nil, nil
+}

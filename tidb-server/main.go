@@ -18,7 +18,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/pingcap/tidb/meta"
 	"io/fs"
 	"os"
 	"runtime"
@@ -38,6 +37,7 @@ import (
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/executor"
 	"github.com/pingcap/tidb/kv"
+	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
@@ -296,9 +296,15 @@ func registerMetrics() {
 
 func createStoreAndDomain() (kv.Storage, *domain.Domain) {
 	cfg := config.GetGlobalConfig()
+
 	fullPath := fmt.Sprintf("%s://%s", cfg.Store, cfg.Path)
 	var err error
 	storage, err := kvstore.New(fullPath)
+	// TODO: Fix this hacky way to init tenant client.
+	if cfg.Tenant.IsTenant && driver.IsTiKVStorage(storage) {
+		err := driver.SetUpTenantContorller(uint64(cfg.Tenant.TenantId), storage, cfg.AdvertiseAddress)
+		terror.MustNil(err)
+	}
 	terror.MustNil(err)
 	// Bootstrap a session to load information schema.
 	dom, err := session.BootstrapSession(storage)
