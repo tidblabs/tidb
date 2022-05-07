@@ -398,7 +398,7 @@ func (w *GCWorker) checkPrepare(ctx context.Context) (bool, uint64, error) {
 }
 
 func (w *GCWorker) calcGlobalMinStartTS(ctx context.Context) (uint64, error) {
-	kvs, err := w.tikvStore.GetSafePointKV().GetWithPrefix(infosync.ServerMinStartTSPath)
+	kvs, err := w.tikvStore.GetSafePointKV().GetWithPrefix(meta.ServerMinStartTSPath)
 	if err != nil {
 		return 0, err
 	}

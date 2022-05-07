@@ -100,10 +100,19 @@ var (
 	TopologyInformationPath = "/topology/tidb"
 	// TrackingIDKey is a random tracking for the cluster that is saved to etcd. Tracking ID can be reset by user.
 	TrackingIDKey = "/tidb/telemetry/tracking_id"
+
+	// ServerInformationPath store server information such as IP, port and so on.
+	ServerInformationPath = "/tidb/server/info"
+	// ServerMinStartTSPath store the server min start timestamp.
+	ServerMinStartTSPath = "/tidb/server/minstartts"
+	// TiFlashTableSyncProgressPath store the tiflash table replica sync progress.
+	TiFlashTableSyncProgressPath = "/tiflash/table/sync"
+	// TopologyPrometheus means address of prometheus.
+	TopologyPrometheus = "/topology/prometheus"
 )
 
 const (
-	// CurrentMagicByteVer is the current magic byte version, used for future meta compatibility.
+	// CurrentMagicByteVer is the current magic byte version,minstartts used for future meta compatibility.
 	CurrentMagicByteVer byte = 0x00
 	// PolicyMagicByte handler
 	// 0x00 - 0x3F: Json Handler
@@ -1276,8 +1285,7 @@ func (m *Meta) SetSchemaDiff(diff *model.SchemaDiff) error {
 
 // SetTenant appends tenantID for some keys and etcd paths
 func SetTenant(tenantID uint16) {
-	tenantIdStr := strconv.FormatInt(int64(tenantID), 10)
-	tenantIdStrBytes := []byte(tenantIdStr)
+	tenantIdStrBytes := []byte(strconv.FormatInt(int64(tenantID), 10))
 
 	// Append tenant ID to sensitive keys
 	mNextGlobalIDKey = append(mNextGlobalIDKey, tenantIdStrBytes...)
@@ -1289,14 +1297,18 @@ func SetTenant(tenantID uint16) {
 	mNextObjectIDKey = append(mNextObjectIDKey, tenantIdStrBytes...)
 
 	// Append tenant ID to sensitive etcd paths for bindinfo, privilege, sysvar, ddl, topology and telemetry
-	BindInfoOwnerKey = BindInfoOwnerKey + "/" + tenantIdStr
-	PrivilegeKey = PrivilegeKey + "/" + tenantIdStr
-	SysVarCacheKey = SysVarCacheKey + "/" + tenantIdStr
-	mSchemaDiffPrefix = mSchemaDiffPrefix + "/" + tenantIdStr
-	DDLOwnerKey = DDLOwnerKey + "/" + tenantIdStr
-	AddingDDLJobPrefix = AddingDDLJobPrefix + "/" + tenantIdStr
-	DDLAllSchemaVersions = DDLAllSchemaVersions + "/" + tenantIdStr
-	DDLGlobalSchemaVersion = DDLGlobalSchemaVersion + "/" + tenantIdStr
-	TopologyInformationPath = TopologyInformationPath + "/" + tenantIdStr
-	TrackingIDKey = TrackingIDKey + "/" + tenantIdStr
+	BindInfoOwnerKey = fmt.Sprintf("%s/%v", BindInfoOwnerKey, tenantID)
+	PrivilegeKey = fmt.Sprintf("%s/%v", PrivilegeKey, tenantID)
+	SysVarCacheKey = fmt.Sprintf("%s/%v", SysVarCacheKey, tenantID)
+	mSchemaDiffPrefix = fmt.Sprintf("%s/%v", mSchemaDiffPrefix, tenantID)
+	DDLOwnerKey = fmt.Sprintf("%s/%v", DDLOwnerKey, tenantID)
+	AddingDDLJobPrefix = fmt.Sprintf("%s/%v", AddingDDLJobPrefix, tenantID)
+	DDLAllSchemaVersions = fmt.Sprintf("%s/%v", DDLAllSchemaVersions, tenantID)
+	DDLGlobalSchemaVersion = fmt.Sprintf("%s/%v", DDLGlobalSchemaVersion, tenantID)
+	TopologyInformationPath = fmt.Sprintf("%s/%v", TopologyInformationPath, tenantID)
+	TrackingIDKey = fmt.Sprintf("%s/%v", TrackingIDKey, tenantID)
+	ServerInformationPath = fmt.Sprintf("%s/%v", ServerInformationPath, tenantID)
+	ServerMinStartTSPath = fmt.Sprintf("%s/%v", ServerMinStartTSPath, tenantID)
+	TiFlashTableSyncProgressPath = fmt.Sprintf("%s/%v", TiFlashTableSyncProgressPath, tenantID)
+	TopologyPrometheus = fmt.Sprintf("%s/%v", TopologyPrometheus, tenantID)
 }
