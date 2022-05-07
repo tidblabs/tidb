@@ -58,12 +58,6 @@ import (
 )
 
 const (
-	// ServerInformationPath store server information such as IP, port and so on.
-	ServerInformationPath = "/tidb/server/info"
-	// ServerMinStartTSPath store the server min start timestamp.
-	ServerMinStartTSPath = "/tidb/server/minstartts"
-	// TiFlashTableSyncProgressPath store the tiflash table replica sync progress.
-	TiFlashTableSyncProgressPath = "/tiflash/table/sync"
 	// keyOpDefaultRetryCnt is the default retry count for etcd store.
 	keyOpDefaultRetryCnt = 5
 	// keyOpDefaultTimeout is the default time out for etcd store.
@@ -76,8 +70,6 @@ const (
 	TopologySessionTTL = 45
 	// TopologyTimeToRefresh means time to refresh etcd.
 	TopologyTimeToRefresh = 30 * time.Second
-	// TopologyPrometheus means address of prometheus.
-	TopologyPrometheus = "/topology/prometheus"
 	// TablePrometheusCacheExpiry is the expiry time for prometheus address cache.
 	TablePrometheusCacheExpiry = 10 * time.Second
 	// RequestRetryInterval is the sleep time before next retry for http request
@@ -175,8 +167,8 @@ func GlobalInfoSyncerInit(ctx context.Context, id string, serverIDGetter func() 
 	is := &InfoSyncer{
 		etcdCli:        etcdCli,
 		info:           getServerInfo(id, serverIDGetter),
-		serverInfoPath: fmt.Sprintf("%s/%s", ServerInformationPath, id),
-		minStartTSPath: fmt.Sprintf("%s/%s", ServerMinStartTSPath, id),
+		serverInfoPath: fmt.Sprintf("%s/%s", meta.ServerInformationPath, id),
+		minStartTSPath: fmt.Sprintf("%s/%s", meta.ServerMinStartTSPath, id),
 	}
 	err := is.init(ctx, skipRegisterToDashBoard)
 	if err != nil {
@@ -289,7 +281,7 @@ func (is *InfoSyncer) getServerInfoByID(ctx context.Context, id string) (*Server
 	if is.etcdCli == nil || id == is.info.ID {
 		return is.info, nil
 	}
-	key := fmt.Sprintf("%s/%s", ServerInformationPath, id)
+	key := fmt.Sprintf("%s/%s", meta.ServerInformationPath, id)
 	infoMap, err := getInfo(ctx, is.etcdCli, key, keyOpDefaultRetryCnt, keyOpDefaultTimeout)
 	if err != nil {
 		return nil, err
@@ -319,7 +311,7 @@ func UpdateTiFlashTableSyncProgress(ctx context.Context, tid int64, progress flo
 	if is.etcdCli == nil {
 		return nil
 	}
-	key := fmt.Sprintf("%s/%v", TiFlashTableSyncProgressPath, tid)
+	key := fmt.Sprintf("%s/%v", meta.TiFlashTableSyncProgressPath, tid)
 	// truncate progress with 2 decimal digits so that it will not be rounded to 1 when the progress is 0.995
 	progressString := types.TruncateFloatToString(progress, 2)
 	return util.PutKVToEtcd(ctx, is.etcdCli, keyOpDefaultRetryCnt, key, progressString)
@@ -334,7 +326,7 @@ func DeleteTiFlashTableSyncProgress(tid int64) error {
 	if is.etcdCli == nil {
 		return nil
 	}
-	key := fmt.Sprintf("%s/%v", TiFlashTableSyncProgressPath, tid)
+	key := fmt.Sprintf("%s/%v", meta.TiFlashTableSyncProgressPath, tid)
 	return util.DeleteKeyFromEtcd(key, is.etcdCli, keyOpDefaultRetryCnt, keyOpDefaultTimeout)
 }
 
@@ -349,13 +341,13 @@ func GetTiFlashTableSyncProgress(ctx context.Context) (map[int64]float64, error)
 		return progressMap, nil
 	}
 	for i := 0; i < keyOpDefaultRetryCnt; i++ {
-		resp, err := is.etcdCli.Get(ctx, TiFlashTableSyncProgressPath+"/", clientv3.WithPrefix())
+		resp, err := is.etcdCli.Get(ctx, meta.TiFlashTableSyncProgressPath+"/", clientv3.WithPrefix())
 		if err != nil {
 			logutil.BgLogger().Info("get tiflash table replica sync progress failed, continue checking.", zap.Error(err))
 			continue
 		}
 		for _, kv := range resp.Kvs {
-			tid, err := strconv.ParseInt(string(kv.Key[len(TiFlashTableSyncProgressPath)+1:]), 10, 64)
+			tid, err := strconv.ParseInt(string(kv.Key[len(meta.TiFlashTableSyncProgressPath)+1:]), 10, 64)
 			if err != nil {
 				logutil.BgLogger().Info("invalid tiflash table replica sync progress key.", zap.String("key", string(kv.Key)))
 				continue
@@ -495,7 +487,7 @@ func (is *InfoSyncer) getAllServerInfo(ctx context.Context) (map[string]*ServerI
 		allInfo[is.info.ID] = getServerInfo(is.info.ID, is.info.ServerIDGetter)
 		return allInfo, nil
 	}
-	allInfo, err := getInfo(ctx, is.etcdCli, ServerInformationPath, keyOpDefaultRetryCnt, keyOpDefaultTimeout, clientv3.WithPrefix())
+	allInfo, err := getInfo(ctx, is.etcdCli, meta.ServerInformationPath, keyOpDefaultRetryCnt, keyOpDefaultTimeout, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +772,7 @@ func (is *InfoSyncer) getPrometheusAddr() (string, error) {
 
 	// Get prometheus address from etcdApi.
 	if res == "" {
-		values, err := is.getPrometheusAddrFromEtcd(TopologyPrometheus)
+		values, err := is.getPrometheusAddrFromEtcd(meta.TopologyPrometheus)
 		if err != nil {
 			return "", errors.Trace(err)
 		}
