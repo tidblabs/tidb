@@ -1406,6 +1406,12 @@ func SetTenant(tenantID uint16) {
 	mPolicies = append(mPolicies, tenantIdStrBytes...)
 	mPolicyGlobalID = append(mPolicyGlobalID, tenantIdStrBytes...)
 	mNextObjectIDKey = append(mNextObjectIDKey, tenantIdStrBytes...)
+	mDDLJobListKey = append(mDDLJobListKey, tenantIdStrBytes...)
+	mDDLJobAddIdxList = append(mDDLJobAddIdxList, tenantIdStrBytes...)
+	mDDLJobHistoryKey = append(mDDLJobHistoryKey, tenantIdStrBytes...)
+	mDDLJobReorgKey = append(mDDLJobReorgKey, tenantIdStrBytes...)
+	DefaultJobListKey = mDDLJobListKey
+	AddIndexJobListKey = mDDLJobAddIdxList
 
 	// Append tenant ID to sensitive etcd paths for bindinfo, privilege, sysvar, ddl, topology and telemetry
 	BindInfoOwnerKey = fmt.Sprintf("%s/%v", BindInfoOwnerKey, tenantID)
