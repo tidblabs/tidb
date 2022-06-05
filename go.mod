@@ -153,6 +153,7 @@ require (
 	github.com/eapache/go-resiliency v1.2.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20180814174437-776d5712da21 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
+	github.com/elastic/gosigar v0.14.2 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/felixge/httpsnoop v1.0.1 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.5+incompatible // indirect
@@ -255,10 +256,8 @@ replace (
 	github.com/pingcap/kvproto => github.com/tidbcloud/kvproto v0.0.0-20221207104026-412a7a511f18
 	github.com/pingcap/tidb/parser => ./parser
 	// Use github.com/tikv/client-go/v2@api-v2-release-6.4
-	github.com/tikv/client-go/v2 => github.com/tikv/client-go/v2 v2.0.3-0.20221222063523-0ab7cd8f0019
-
+	github.com/tikv/client-go/v2 => github.com/nolouch/client-go/v2 v2.0.0-alpha.0.20230106060951-36423f9925d8
 	// Use github.com/tidbcloud/pd-cse/client
 	github.com/tikv/pd/client => github.com/tidbcloud/pd-cse/client v0.0.0-20220905061235-4cfe0db56daa
 	go.opencensus.io => go.opencensus.io v0.23.1-0.20220331163232-052120675fac
-
 )

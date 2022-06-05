@@ -483,6 +483,10 @@ func createStoreAndDomain(keyspaceName string) (kv.Storage, *domain.Domain, erro
 	if err != nil {
 		return nil, nil, err
 	}
+
+	err = driver.SetUpTenantContorller(keyspaceName)
+	terror.MustNil(err)
+
 	// Bootstrap a session to load information schema.
 	dom, err := session.BootstrapSession(storage)
 	if err != nil {

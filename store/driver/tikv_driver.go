@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"net/url"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"github.com/pingcap/tidb/store/gcworker"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/tikv/client-go/v2/config"
+	"github.com/tikv/client-go/v2/keyspace/tenantcost"
 	"github.com/tikv/client-go/v2/tikv"
 	"github.com/tikv/client-go/v2/tikvrpc"
 	"github.com/tikv/client-go/v2/util"
@@ -213,6 +215,26 @@ func (d TiKVDriver) OpenWithOptions(path string, options ...Option) (kv.Storage,
 
 	mc.cache[uuid] = store
 	return store, nil
+}
+
+// IsTiKVStore checks whether or not store is a tikv store.
+func IsTiKVStorage(s kv.Storage) bool {
+	_, ok := s.(*tikvStore)
+	return ok
+}
+
+// SetUpTenantContorller sets up tenant controller.
+func SetUpTenantContorller(KeyspaceName string) error {
+	h := fnv.New32a()
+	h.Write([]byte(KeyspaceName))
+	uid := uint64(h.Sum32())
+	tenantKVControllor, err := tenantcost.NewTenantSideCostController(uid, nil)
+	if err != nil {
+		return err
+	}
+	tenantKVControllor.Start(context.Background(), KeyspaceName)
+	tikv.SetUpTenantInterceptor(tenantKVControllor)
+	return nil
 }
 
 type tikvStore struct {
