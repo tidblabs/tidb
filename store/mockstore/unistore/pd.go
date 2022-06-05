@@ -152,10 +152,18 @@ func (c *pdClient) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ..
 	return nil, nil
 }
 
+func (c *pdClient) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...pd.RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	return nil, nil
+}
+
 func (c *pdClient) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*pd.Region, error) {
 	return nil, nil
 }
 
 func (c *pdClient) UpdateOption(option pd.DynamicOption, value interface{}) error {
 	return nil
+}
+
+func (c *pdClient) TokenBucket(ctx context.Context, req *pdpb.TokenBucketRequest) (*pdpb.TokenBucketResponse, error) {
+	return nil, nil
 }
