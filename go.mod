@@ -50,7 +50,7 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20220303073211-00fea37feb66
 	github.com/pingcap/fn v0.0.0-20200306044125-d5540d389059
-	github.com/pingcap/kvproto v0.0.0-20220314103629-10e688307221
+	github.com/pingcap/kvproto v0.0.0-20220406064517-f7a7c8ccda74
 	github.com/pingcap/log v0.0.0-20211215031037-e024ba4eb0ee
 	github.com/pingcap/sysutil v0.0.0-20220114020952-ea68d2dbf5b4
 	github.com/pingcap/tidb-tools v6.0.0-alpha.0.20220309081549-563c2a342f9c+incompatible
@@ -106,3 +106,9 @@ replace github.com/pingcap/tidb/parser => ./parser
 
 // fix potential security issue(CVE-2020-26160) introduced by indirect dependency.
 replace github.com/dgrijalva/jwt-go => github.com/form3tech-oss/jwt-go v3.2.6-0.20210809144907-32ab6a8243d7+incompatible
+
+replace github.com/tikv/client-go/v2 => github.com/tidblabs/client-go/v2 v2.0.1-0.20220605185119-2e72e25fac66
+
+replace github.com/pingcap/kvproto => github.com/tidblabs/kvproto v0.0.0-20220407200414-24874abbd469
+
+replace github.com/tikv/pd/client => github.com/tidblabs/pd/client v0.0.0-20220412182747-eb76255e4ea5
