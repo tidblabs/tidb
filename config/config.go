@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -861,6 +862,15 @@ func InitializeConfig(confPath string, configCheck, configStrict bool, enforceCm
 		}
 	}
 	enforceCmdArgs(cfg)
+
+	// try load tenant config from environment variable
+	if !cfg.Tenant.IsTenant || cfg.Tenant.TenantId == 0 {
+		tenantId, err := strconv.ParseUint(os.Getenv("TIDB_TENANT_ID"), 10, 16)
+		if err == nil {
+			cfg.Tenant.TenantId = uint16(tenantId)
+			cfg.Tenant.IsTenant = true
+		}
+	}
 
 	if err := cfg.Valid(); err != nil {
 		if !filepath.IsAbs(confPath) {
