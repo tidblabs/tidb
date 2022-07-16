@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/pingcap/tidb/config"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -72,6 +73,14 @@ func (m *TiFlashPDPlacementManager) Close(ctx context.Context) {
 func (m *TiFlashPDPlacementManager) SetPlacementRule(ctx context.Context, rule placement.TiFlashRule) error {
 	if rule.Count == 0 {
 		return m.DeletePlacementRule(ctx, rule.GroupID, rule.ID)
+	}
+	tenant := config.GetGlobalConfig().Tenant
+	if tenant.IsTenant {
+		rule.Constraints = append(rule.Constraints, placement.Constraint{
+			Key:    "tenant-id",
+			Op:     placement.In,
+			Values: []string{strconv.FormatUint(uint64(tenant.TenantId), 10)},
+		})
 	}
 	j, _ := json.Marshal(rule)
 	buf := bytes.NewBuffer(j)
