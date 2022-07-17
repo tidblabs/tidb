@@ -30,10 +30,6 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
-	"modernc.org/mathutil"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend"
 	"github.com/pingcap/tidb/br/pkg/lightning/backend/kv"
@@ -52,6 +48,9 @@ import (
 	"github.com/pingcap/tidb/table"
 	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/util/mathutil"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -348,7 +347,6 @@ func (rc *Controller) checkClusterRegion(ctx context.Context) error {
 }
 
 // StoragePermission checks whether Lightning has enough permission to storage.
-// this test cannot be skipped.
 func (rc *Controller) StoragePermission(ctx context.Context) error {
 	passed := true
 	message := "Lightning has the correct storage permission"
@@ -592,8 +590,8 @@ func (rc *Controller) CheckpointIsValid(ctx context.Context, tableInfo *mydump.M
 
 // hasDefault represents col has default value.
 func hasDefault(col *model.ColumnInfo) bool {
-	return col.DefaultIsExpr || col.DefaultValue != nil || !mysql.HasNotNullFlag(col.Flag) ||
-		col.IsGenerated() || mysql.HasAutoIncrementFlag(col.Flag)
+	return col.DefaultIsExpr || col.DefaultValue != nil || !mysql.HasNotNullFlag(col.GetFlag()) ||
+		col.IsGenerated() || mysql.HasAutoIncrementFlag(col.GetFlag())
 }
 
 func (rc *Controller) readFirstRow(ctx context.Context, dataFileMeta mydump.SourceFileMeta) (cols []string, row []types.Datum, err error) {
@@ -665,7 +663,7 @@ func (rc *Controller) SchemaIsValid(ctx context.Context, tableInfo *mydump.MDTab
 	core := info.Core
 	defaultCols := make(map[string]struct{})
 	for _, col := range core.Columns {
-		if hasDefault(col) || (info.Core.ContainsAutoRandomBits() && mysql.HasPriKeyFlag(col.Flag)) {
+		if hasDefault(col) || (info.Core.ContainsAutoRandomBits() && mysql.HasPriKeyFlag(col.GetFlag())) {
 			// this column has default value or it's auto random id, so we can ignore it
 			defaultCols[col.Name.L] = struct{}{}
 		}
@@ -1094,9 +1092,10 @@ func (rc *Controller) checkTableEmpty(ctx context.Context) error {
 
 	var lock sync.Mutex
 	tableNames := make([]string, 0)
-	concurrency := utils.MinInt(tableCount, rc.cfg.App.RegionConcurrency)
+	concurrency := mathutil.Min(tableCount, rc.cfg.App.RegionConcurrency)
 	ch := make(chan string, concurrency)
 	eg, gCtx := errgroup.WithContext(ctx)
+
 	for i := 0; i < concurrency; i++ {
 		eg.Go(func() error {
 			for tblName := range ch {
@@ -1125,9 +1124,15 @@ func (rc *Controller) checkTableEmpty(ctx context.Context) error {
 			return nil
 		})
 	}
+loop:
 	for _, db := range rc.dbMetas {
 		for _, tbl := range db.Tables {
-			ch <- common.UniqueTable(tbl.DB, tbl.Name)
+			select {
+			case ch <- common.UniqueTable(tbl.DB, tbl.Name):
+			case <-gCtx.Done():
+				break loop
+			}
+
 		}
 	}
 	close(ch)
@@ -1135,7 +1140,7 @@ func (rc *Controller) checkTableEmpty(ctx context.Context) error {
 		if common.IsContextCanceledError(err) {
 			return nil
 		}
-		return errors.Trace(err)
+		return errors.Annotate(err, "check table contains data failed")
 	}
 
 	if len(tableNames) > 0 {
@@ -1147,13 +1152,20 @@ func (rc *Controller) checkTableEmpty(ctx context.Context) error {
 	return nil
 }
 
-func tableContainsData(ctx context.Context, db utils.QueryExecutor, tableName string) (bool, error) {
+func tableContainsData(ctx context.Context, db utils.DBExecutor, tableName string) (bool, error) {
+	failpoint.Inject("CheckTableEmptyFailed", func() {
+		failpoint.Return(false, errors.New("mock error"))
+	})
 	query := "select 1 from " + tableName + " limit 1"
+	exec := common.SQLWithRetry{
+		DB:     db,
+		Logger: log.L(),
+	}
 	var dump int
-	err := db.QueryRowContext(ctx, query).Scan(&dump)
+	err := exec.QueryRow(ctx, "check table empty", query, &dump)
 
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.ErrorEqual(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
 		return false, errors.Trace(err)

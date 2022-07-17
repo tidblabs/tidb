@@ -47,8 +47,8 @@ import (
 	"github.com/pingcap/tidb/session"
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/tablecodec"
-	"github.com/pingcap/tidb/util/admin"
 	"github.com/pingcap/tidb/util/codec"
+	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/logutil"
 	tikverr "github.com/tikv/client-go/v2/error"
 	tikvstore "github.com/tikv/client-go/v2/kv"
@@ -698,6 +698,9 @@ func (w *GCWorker) deleteRanges(ctx context.Context, safePoint uint64, concurren
 		return errors.Trace(err)
 	}
 
+	// Cache table ids on which placement rules have been GC-ed, to avoid redundantly GC the same table id multiple times.
+	gcPlacementRuleCache := make(map[int64]interface{}, len(ranges))
+
 	logutil.Logger(ctx).Info("[gc worker] start delete ranges",
 		zap.String("uuid", w.uuid),
 		zap.Int("ranges", len(ranges)))
@@ -730,7 +733,7 @@ func (w *GCWorker) deleteRanges(ctx context.Context, safePoint uint64, concurren
 			metrics.GCUnsafeDestroyRangeFailuresCounterVec.WithLabelValues("save").Inc()
 		}
 
-		if err := w.doGCPlacementRules(r); err != nil {
+		if err := w.doGCPlacementRules(safePoint, r, gcPlacementRuleCache); err != nil {
 			logutil.Logger(ctx).Error("[gc worker] gc placement rules failed on range",
 				zap.String("uuid", w.uuid),
 				zap.Int64("jobID", r.JobID),
@@ -1862,7 +1865,7 @@ func (w *GCWorker) saveValueToSysTable(key, value string) error {
 // GC placement rules when the partitions are removed by the GC worker.
 // Placement rules cannot be removed immediately after drop table / truncate table,
 // because the tables can be flashed back or recovered.
-func (w *GCWorker) doGCPlacementRules(dr util.DelRangeTask) (err error) {
+func (w *GCWorker) doGCPlacementRules(safePoint uint64, dr util.DelRangeTask, gcPlacementRuleCache map[int64]interface{}) (err error) {
 	// Get the job from the job history
 	var historyJob *model.Job
 	failpoint.Inject("mockHistoryJobForGC", func(v failpoint.Value) {
@@ -1873,6 +1876,7 @@ func (w *GCWorker) doGCPlacementRules(dr util.DelRangeTask) (err error) {
 		historyJob = &model.Job{
 			ID:      dr.JobID,
 			Type:    model.ActionDropTable,
+			TableID: int64(v.(int)),
 			RawArgs: args,
 		}
 	})
@@ -1887,7 +1891,7 @@ func (w *GCWorker) doGCPlacementRules(dr util.DelRangeTask) (err error) {
 			return
 		}
 		if historyJob == nil {
-			return admin.ErrDDLJobNotFound.GenWithStackByArgs(dr.JobID)
+			return dbterror.ErrDDLJobNotFound.GenWithStackByArgs(dr.JobID)
 		}
 	}
 
@@ -1916,12 +1920,22 @@ func (w *GCWorker) doGCPlacementRules(dr util.DelRangeTask) (err error) {
 	}
 
 	for _, id := range physicalTableIDs {
+		// Skip table ids that's already successfully deleted.
+		if _, ok := gcPlacementRuleCache[id]; ok {
+			continue
+		}
 		// Delete pd rule
-		logutil.BgLogger().Info("try delete TiFlash pd rule", zap.Int64("tableID", id), zap.String("endKey", string(dr.EndKey)))
+		failpoint.Inject("gcDeletePlacementRuleCounter", func() {})
+		logutil.BgLogger().Info("try delete TiFlash pd rule",
+			zap.Int64("tableID", id), zap.String("endKey", string(dr.EndKey)), zap.Uint64("safePoint", safePoint))
 		ruleID := fmt.Sprintf("table-%v-r", id)
 		if err := infosync.DeleteTiFlashPlacementRule(context.Background(), "tiflash", ruleID); err != nil {
 			// If DeletePlacementRule fails here, the rule will be deleted in `HandlePlacementRuleRoutine`.
-			logutil.BgLogger().Error("delete TiFlash pd rule failed when gc", zap.Error(err), zap.String("ruleID", ruleID))
+			logutil.BgLogger().Error("delete TiFlash pd rule failed when gc",
+				zap.Error(err), zap.String("ruleID", ruleID), zap.Uint64("safePoint", safePoint))
+		} else {
+			// Cache the table id if its related rule are deleted successfully.
+			gcPlacementRuleCache[id] = struct{}{}
 		}
 	}
 	return infosync.PutRuleBundlesWithDefaultRetry(context.TODO(), bundles)
@@ -1952,7 +1966,7 @@ func (w *GCWorker) doGCLabelRules(dr util.DelRangeTask) (err error) {
 			return
 		}
 		if historyJob == nil {
-			return admin.ErrDDLJobNotFound.GenWithStackByArgs(dr.JobID)
+			return dbterror.ErrDDLJobNotFound.GenWithStackByArgs(dr.JobID)
 		}
 	}
 
@@ -1983,8 +1997,8 @@ func (w *GCWorker) doGCLabelRules(dr util.DelRangeTask) (err error) {
 func getGCRules(ids []int64, rules map[string]*label.Rule) []string {
 	oldRange := make(map[string]struct{})
 	for _, id := range ids {
-		startKey := hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(id)))
-		endKey := hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(id+1)))
+		startKey := hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTablePrefix(id)))
+		endKey := hex.EncodeToString(codec.EncodeBytes(nil, tablecodec.GenTablePrefix(id+1)))
 		oldRange[startKey+endKey] = struct{}{}
 	}
 

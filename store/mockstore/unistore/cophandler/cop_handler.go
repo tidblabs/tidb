@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/tidb/store/mockstore/unistore/client"
 	"github.com/pingcap/tidb/store/mockstore/unistore/lockstore"
 	"github.com/pingcap/tidb/store/mockstore/unistore/tikv/dbreader"
+	"github.com/pingcap/tidb/store/mockstore/unistore/tikv/kverrors"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/codec"
@@ -431,17 +432,22 @@ func buildRespWithMPPExec(chunks []tipb.Chunk, counts, ndvs []int64, exec mppExe
 		}
 	}
 	resp.ExecDetails = &kvrpcpb.ExecDetails{
-		TimeDetail: &kvrpcpb.TimeDetail{ProcessWallTimeMs: int64(dur / time.Millisecond)},
+		TimeDetail: &kvrpcpb.TimeDetail{ProcessWallTimeMs: uint64(dur / time.Millisecond)},
 	}
 	resp.ExecDetailsV2 = &kvrpcpb.ExecDetailsV2{
 		TimeDetail: resp.ExecDetails.TimeDetail,
 	}
-	data, err := proto.Marshal(selResp)
-	if err != nil {
-		resp.OtherError = err.Error()
+	data, mErr := proto.Marshal(selResp)
+	if mErr != nil {
+		resp.OtherError = mErr.Error()
 		return resp
 	}
 	resp.Data = data
+	if err != nil {
+		if conflictErr, ok := errors.Cause(err).(*kverrors.ErrConflict); ok {
+			resp.OtherError = conflictErr.Error()
+		}
+	}
 	return resp
 }
 
@@ -530,15 +536,15 @@ func appendRow(chunks []tipb.Chunk, data []byte, rowCnt int) []tipb.Chunk {
 // fieldTypeFromPBColumn creates a types.FieldType from tipb.ColumnInfo.
 func fieldTypeFromPBColumn(col *tipb.ColumnInfo) *types.FieldType {
 	charsetStr, collationStr, _ := charset.GetCharsetInfoByID(int(collate.RestoreCollationIDIfNeeded(col.GetCollation())))
-	return &types.FieldType{
-		Tp:      byte(col.GetTp()),
-		Flag:    uint(col.Flag),
-		Flen:    int(col.GetColumnLen()),
-		Decimal: int(col.GetDecimal()),
-		Elems:   col.Elems,
-		Charset: charsetStr,
-		Collate: collationStr,
-	}
+	ft := &types.FieldType{}
+	ft.SetType(byte(col.GetTp()))
+	ft.SetFlag(uint(col.GetFlag()))
+	ft.SetFlen(int(col.GetColumnLen()))
+	ft.SetDecimal(int(col.GetDecimal()))
+	ft.SetElems(col.Elems)
+	ft.SetCharset(charsetStr)
+	ft.SetCollate(collationStr)
+	return ft
 }
 
 // handleCopChecksumRequest handles coprocessor check sum request.

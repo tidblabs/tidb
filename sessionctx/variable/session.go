@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	pumpcli "github.com/pingcap/tidb-tools/tidb-binlog/pump_client"
 	"github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/meta/autoid"
@@ -43,10 +42,11 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
 	"github.com/pingcap/tidb/sessionctx/stmtctx"
+	pumpcli "github.com/pingcap/tidb/tidb-binlog/pump_client"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/execdetails"
-	utilMath "github.com/pingcap/tidb/util/math"
+	"github.com/pingcap/tidb/util/mathutil"
 	"github.com/pingcap/tidb/util/rowcodec"
 	"github.com/pingcap/tidb/util/stringutil"
 	"github.com/pingcap/tidb/util/tableutil"
@@ -66,6 +66,7 @@ type RetryInfo struct {
 	DroppedPreparedStmtIDs []uint32
 	autoIncrementIDs       retryInfoAutoIDs
 	autoRandomIDs          retryInfoAutoIDs
+	LastRcReadTS           uint64
 }
 
 // Clean does some clean work.
@@ -182,6 +183,9 @@ type TransactionContext struct {
 
 	// CachedTables is not nil if the transaction write on cached table.
 	CachedTables map[int64]interface{}
+
+	// Last ts used by read-consistency read.
+	LastRcReadTs uint64
 }
 
 // GetShard returns the shard prefix for the next `count` rowids.
@@ -535,6 +539,9 @@ type SessionVars struct {
 	// PlanColumnID is the unique id for column when building plan.
 	PlanColumnID int64
 
+	// MapHashCode2UniqueID4ExtendedCol map the expr's hash code to specified unique ID.
+	MapHashCode2UniqueID4ExtendedCol map[string]int
+
 	// User is the user identity with which the session login.
 	User *auth.UserIdentity
 
@@ -618,6 +625,11 @@ type SessionVars struct {
 	// Value set to `true` means enforce use mpp.
 	// Note if you want to set `enforceMPPExecution` to `true`, you must set `allowMPPExecution` to `true` first.
 	enforceMPPExecution bool
+
+	// TiFlashMaxThreads is the maximum number of threads to execute the request which is pushed down to tiflash.
+	// Default value is -1, means it will not be pushed down to tiflash.
+	// If the value is bigger than -1, it will be pushed down to tiflash and used to create db context in tiflash.
+	TiFlashMaxThreads int64
 
 	// TiDBAllowAutoRandExplicitInsert indicates whether explicit insertion on auto_random column is allowed.
 	AllowAutoRandExplicitInsert bool
@@ -706,6 +718,12 @@ type SessionVars struct {
 	// OptimizerSelectivityLevel defines the level of the selectivity estimation in plan.
 	OptimizerSelectivityLevel int
 
+	// OptimizerEnableNewOnlyFullGroupByCheck enables the new only_full_group_by check which is implemented by maintaining functional dependency.
+	OptimizerEnableNewOnlyFullGroupByCheck bool
+
+	// EnableOuterJoinWithJoinReorder enables TiDB to involve the outer join into the join reorder.
+	EnableOuterJoinReorder bool
+
 	// EnableTablePartition enables table partition feature.
 	EnableTablePartition string
 
@@ -720,6 +738,9 @@ type SessionVars struct {
 
 	// EnablePipelinedWindowExec enables executing window functions in a pipelined manner.
 	EnablePipelinedWindowExec bool
+
+	// AllowProjectionPushDown enables pushdown projection on TiKV.
+	AllowProjectionPushDown bool
 
 	// EnableStrictDoubleTypeCheck enables table field double type check.
 	EnableStrictDoubleTypeCheck bool
@@ -987,10 +1008,14 @@ type SessionVars struct {
 	}
 
 	// Rng stores the rand_seed1 and rand_seed2 for Rand() function
-	Rng *utilMath.MysqlRng
+	Rng *mathutil.MysqlRng
 
 	// EnablePaging indicates whether enable paging in coprocessor requests.
 	EnablePaging bool
+
+	// EnableLegacyInstanceScope says if SET SESSION can be used to set an instance
+	// scope variable. The default is TRUE.
+	EnableLegacyInstanceScope bool
 
 	// ReadConsistency indicates the read consistency requirement.
 	ReadConsistency ReadConsistencyLevel
@@ -1006,8 +1031,20 @@ type SessionVars struct {
 	AssertionLevel AssertionLevel
 	// IgnorePreparedCacheCloseStmt controls if ignore the close-stmt command for prepared statement.
 	IgnorePreparedCacheCloseStmt bool
+	// EnableNewCostInterface is a internal switch to indicates whether to use the new cost calculation interface.
+	EnableNewCostInterface bool
 	// BatchPendingTiFlashCount shows the threshold of pending TiFlash tables when batch adding.
 	BatchPendingTiFlashCount int
+	// RcReadCheckTS indicates if ts check optimization is enabled for current session.
+	RcReadCheckTS bool
+	// RemoveOrderbyInSubquery indicates whether to remove ORDER BY in subquery.
+	RemoveOrderbyInSubquery bool
+	// NonTransactionalIgnoreError indicates whether to ignore error in non-transactional statements.
+	// When set to false, returns immediately when it meets the first error.
+	NonTransactionalIgnoreError bool
+
+	// MaxAllowedPacket indicates the maximum size of a packet for the MySQL protocol.
+	MaxAllowedPacket uint64
 }
 
 // InitStatementContext initializes a StatementContext, the object is reused to reduce allocation.
@@ -1177,6 +1214,7 @@ func NewSessionVars() *SessionVars {
 		BroadcastJoinThresholdSize:  DefBroadcastJoinThresholdSize,
 		BroadcastJoinThresholdCount: DefBroadcastJoinThresholdSize,
 		OptimizerSelectivityLevel:   DefTiDBOptimizerSelectivityLevel,
+		EnableOuterJoinReorder:      DefTiDBEnableOuterJoinReorder,
 		RetryLimit:                  DefTiDBRetryLimit,
 		DisableTxnAutoRetry:         DefTiDBDisableTxnAutoRetry,
 		DDLReorgPriority:            kv.PriorityLow,
@@ -1240,8 +1278,11 @@ func NewSessionVars() *SessionVars {
 		TMPTableSize:                DefTiDBTmpTableMaxSize,
 		MPPStoreLastFailTime:        make(map[string]time.Time),
 		MPPStoreFailTTL:             DefTiDBMPPStoreFailTTL,
-		Rng:                         utilMath.NewWithTime(),
+		Rng:                         mathutil.NewWithTime(),
 		StatsLoadSyncWait:           StatsLoadSyncWait.Load(),
+		EnableLegacyInstanceScope:   DefEnableLegacyInstanceScope,
+		RemoveOrderbyInSubquery:     DefTiDBRemoveOrderbyInSubquery,
+		MaxAllowedPacket:            DefMaxAllowedPacket,
 	}
 	vars.KVVars = tikvstore.NewVariables(&vars.Killed)
 	vars.Concurrency = Concurrency{
@@ -1259,7 +1300,7 @@ func NewSessionVars() *SessionVars {
 		ExecutorConcurrency:        DefExecutorConcurrency,
 	}
 	vars.MemQuota = MemQuota{
-		MemQuotaQuery:      config.GetGlobalConfig().MemQuotaQuery,
+		MemQuotaQuery:      DefTiDBMemQuotaQuery,
 		MemQuotaApplyCache: DefTiDBMemQuotaApplyCache,
 	}
 	vars.BatchSize = BatchSize{
@@ -1273,6 +1314,7 @@ func NewSessionVars() *SessionVars {
 	vars.allowMPPExecution = DefTiDBAllowMPPExecution
 	vars.HashExchangeWithNewCollation = DefTiDBHashExchangeWithNewCollation
 	vars.enforceMPPExecution = DefTiDBEnforceMPPExecution
+	vars.TiFlashMaxThreads = DefTiFlashMaxThreads
 	vars.MPPStoreFailTTL = DefTiDBMPPStoreFailTTL
 
 	enableChunkRPC := "0"
@@ -1423,6 +1465,7 @@ func (s *SessionVars) GetParseParams() []parser.ParseParam {
 
 // SetUserVar set the value and collation for user defined variable.
 func (s *SessionVars) SetUserVar(varName string, svalue string, collation string) {
+	varName = strings.ToLower(varName)
 	if len(collation) > 0 {
 		s.Users[varName] = types.NewCollationStringDatum(stringutil.Copy(svalue), collation)
 	} else {
@@ -2346,4 +2389,13 @@ func (s *SessionVars) GetSeekFactor(tbl *model.TableInfo) float64 {
 		}
 	}
 	return s.seekFactor
+}
+
+// IsRcCheckTsRetryable checks if the current error is retryable for `RcReadCheckTS` path.
+func (s *SessionVars) IsRcCheckTsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	// The `RCCheckTS` flag of `stmtCtx` is set.
+	return s.RcReadCheckTS && s.StmtCtx.RCCheckTS && errors.ErrorEqual(err, kv.ErrWriteConflict)
 }

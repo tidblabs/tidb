@@ -516,7 +516,7 @@ func (ts *LogicalTableScan) DeriveStats(childStats []*property.StatsInfo, selfSc
 		isUnsigned := false
 		if ts.Source.tableInfo.PKIsHandle {
 			if pkColInfo := ts.Source.tableInfo.GetPkColInfo(); pkColInfo != nil {
-				isUnsigned = mysql.HasUnsignedFlag(pkColInfo.Flag)
+				isUnsigned = mysql.HasUnsignedFlag(pkColInfo.GetFlag())
 			}
 		}
 		ts.Ranges = ranger.FullIntRange(isUnsigned)
@@ -541,7 +541,7 @@ func (is *LogicalIndexScan) DeriveStats(childStats []*property.StatsInfo, selfSc
 	is.FullIdxCols, is.FullIdxColLens = expression.IndexInfo2Cols(is.Columns, selfSchema.Columns, is.Index)
 	if !is.Index.Unique && !is.Index.Primary && len(is.Index.Columns) == len(is.IdxCols) {
 		handleCol := is.getPKIsHandleCol(selfSchema)
-		if handleCol != nil && !mysql.HasUnsignedFlag(handleCol.RetType.Flag) {
+		if handleCol != nil && !mysql.HasUnsignedFlag(handleCol.RetType.GetFlag()) {
 			is.IdxCols = append(is.IdxCols, handleCol)
 			is.IdxColLens = append(is.IdxColLens, types.UnspecifiedLength)
 		}
@@ -655,7 +655,7 @@ func (ds *DataSource) accessPathsForConds(conditions []expression.Expression, us
 			var unsignedIntHandle bool
 			if path.IsIntHandlePath && ds.tableInfo.PKIsHandle {
 				if pkColInfo := ds.tableInfo.GetPkColInfo(); pkColInfo != nil {
-					unsignedIntHandle = mysql.HasUnsignedFlag(pkColInfo.Flag)
+					unsignedIntHandle = mysql.HasUnsignedFlag(pkColInfo.GetFlag())
 				}
 			}
 			// If the path contains a full range, ignore it.
@@ -1258,6 +1258,13 @@ func (p *LogicalCTE) DeriveStats(childStats []*property.StatsInfo, selfSchema *e
 
 	var err error
 	if p.cte.seedPartPhysicalPlan == nil {
+		// Build push-downed predicates.
+		if len(p.cte.pushDownPredicates) > 0 {
+			newCond := expression.ComposeDNFCondition(p.ctx, p.cte.pushDownPredicates...)
+			newSel := LogicalSelection{Conditions: []expression.Expression{newCond}}.Init(p.SCtx(), p.cte.seedPartLogicalPlan.SelectBlockOffset())
+			newSel.SetChildren(p.cte.seedPartLogicalPlan)
+			p.cte.seedPartLogicalPlan = newSel
+		}
 		p.cte.seedPartPhysicalPlan, _, err = DoOptimize(context.TODO(), p.ctx, p.cte.optFlag, p.cte.seedPartLogicalPlan)
 		if err != nil {
 			return nil, err

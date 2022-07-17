@@ -240,6 +240,14 @@ type StatementContext struct {
 
 	// SysdateIsNow indicates whether sysdate() is an alias of now() in this statement
 	SysdateIsNow bool
+
+	// RCCheckTS indicates the current read-consistency read select statement will use `RCCheckTS` path.
+	RCCheckTS bool
+
+	// IsSQLRegistered uses to indicate whether the SQL has been registered for TopSQL.
+	IsSQLRegistered atomic2.Bool
+	// IsSQLAndPlanRegistered uses to indicate whether the SQL and plan has been registered for TopSQL.
+	IsSQLAndPlanRegistered atomic2.Bool
 }
 
 // StmtHints are SessionVars related sql hints.
@@ -251,6 +259,7 @@ type StmtHints struct {
 	ReplicaRead             byte
 	AllowInSubqToJoinAndAgg bool
 	NoIndexMergeHint        bool
+	StraightJoinOrder       bool
 	// EnableCascadesPlanner is use cascades planner for a single query only.
 	EnableCascadesPlanner bool
 	// ForceNthPlan indicates the PlanCounterTp number for finding physical plan.

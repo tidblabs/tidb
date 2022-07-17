@@ -25,7 +25,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/cznic/mathutil"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -41,6 +40,7 @@ import (
 	"github.com/pingcap/tidb/store/driver/options"
 	"github.com/pingcap/tidb/util/execdetails"
 	"github.com/pingcap/tidb/util/logutil"
+	"github.com/pingcap/tidb/util/mathutil"
 	"github.com/pingcap/tidb/util/memory"
 	"github.com/pingcap/tidb/util/paging"
 	"github.com/pingcap/tidb/util/trxevents"
@@ -133,7 +133,7 @@ func (c *CopClient) Send(ctx context.Context, req *kv.Request, variables interfa
 		it.sendRate = util.NewRateLimit(it.concurrency)
 	}
 	it.actionOnExceed = newRateLimitAction(uint(it.sendRate.GetCapacity()))
-	if sessionMemTracker != nil {
+	if sessionMemTracker != nil && enabledRateLimitAction {
 		sessionMemTracker.FallbackOldAndSetNewAction(it.actionOnExceed)
 	}
 
@@ -300,7 +300,7 @@ type copIterator struct {
 	wg sync.WaitGroup
 	// closed represents when the Close is called.
 	// There are two cases we need to close the `finishCh` channel, one is when context is done, the other one is
-	// when the Close is called. we use atomic.CompareAndSwap `closed` to to make sure the channel is not closed twice.
+	// when the Close is called. we use atomic.CompareAndSwap `closed` to make sure the channel is not closed twice.
 	closed uint32
 
 	resolvedLocks  util.TSSet
@@ -983,6 +983,9 @@ func (worker *copIteratorWorker) handleCopResponse(bo *Backoffer, rpcCtx *tikv.R
 			zap.Uint64("regionID", task.region.GetID()),
 			zap.String("storeAddr", task.storeAddr),
 			zap.Error(err))
+		if strings.Contains(err.Error(), "write conflict") {
+			return nil, kv.ErrWriteConflict
+		}
 		return nil, errors.Trace(err)
 	}
 	// When the request is using streaming API, the `Range` is not nil.
@@ -1310,6 +1313,7 @@ func (e *rateLimitAction) close() {
 	e.conditionLock()
 	defer e.conditionUnlock()
 	e.cond.exceeded = false
+	e.SetFinished()
 }
 
 func (e *rateLimitAction) setEnabled(enabled bool) {
@@ -1342,6 +1346,8 @@ func isolationLevelToPB(level kv.IsoLevel) kvrpcpb.IsolationLevel {
 		return kvrpcpb.IsolationLevel_RC
 	case kv.SI:
 		return kvrpcpb.IsolationLevel_SI
+	case kv.RCCheckTS:
+		return kvrpcpb.IsolationLevel_RCCheckTS
 	default:
 		return kvrpcpb.IsolationLevel_SI
 	}

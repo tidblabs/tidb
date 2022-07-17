@@ -15,9 +15,10 @@
 package funcdep
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/pingcap/tidb/util/logutil"
 )
 
 type fdEdge struct {
@@ -31,18 +32,23 @@ type fdEdge struct {
 	// And if there's a functional dependency `const` -> `column` exists. We would let the from side be empty.
 	strict bool
 	equiv  bool
-	// unique is flag used to distinguish unique lax FD and non-unique lax FD, the difference is as below:
-	// 1: for unique lax FD: the determinant's normal value can't be repeatable, only the null value can be multiple.
-	//		which means: only limitation of not-null attribute to its determinant side can strengthen it as strict one.
-	// 2: for non-unique lax FD: the determinant's normal value and null value can be repeatable.
-	// 		which means: we have to strength both side of not-null attribute to strengthen it as strict one.
-	uniLax bool
+
+	// FD with non-nil conditionNC is hidden in FDSet, it will be visible again when at least one null-reject column in conditionNC.
+	// conditionNC should be satisfied before some FD make vision again, it's quite like lax FD to be strengthened as strict
+	// one. But the constraints should take effect on specified columns from conditionNC rather than just determinant columns.
+	conditionNC *FastIntSet
 }
 
 // FDSet is the main portal of functional dependency, it stores the relationship between (extended table / physical table)'s
 // columns. For more theory about this design, ref the head comments in the funcdep/doc.go.
 type FDSet struct {
 	fdEdges []*fdEdge
+	// after left join, according to rule 3.3.3, it may create a lax FD from inner equivalence
+	// cols pointing to outer equivalence cols.  eg: t left join t1 on t.a = t1.b, leading a
+	// lax FD from t1.b ~> t.a, this lax attribute is coming from supplied null value to all
+	// left rows, once there is a null-refusing predicate on the inner side on upper layer, this
+	// can be equivalence again. (the outer rows left are all coming from equal matching)
+	ncEdges []*fdEdge
 	// NotNullCols is used to record the columns with not-null attributes applied.
 	// eg: {1} ~~> {2,3}, when {2,3} not null is applied, it actually does nothing.
 	// but we should record {2,3} as not-null down for the convenience of transferring
@@ -55,18 +61,9 @@ type FDSet struct {
 	// GroupByCols is used to record columns / expressions that under the group by phrase.
 	GroupByCols FastIntSet
 	HasAggBuilt bool
-	// after left join, according to rule 3.3.3, it may create a lax FD from inner equivalence
-	// cols pointing to outer equivalence cols.  eg: t left join t1 on t.a = t1.b, leading a
-	// lax FD from t1.b ~> t.a, this lax attribute is coming from supplied null value to all
-	// left rows, once there is a null-refusing predicate on the inner side on upper layer, this
-	// can be equivalence again. (the outer rows left are all coming from equal matching)
-	//
-	// why not just makeNotNull of them, because even a non-equiv-related inner col can also
-	// refuse supplied null values.
-	Rule333Equiv struct {
-		Edges     []*fdEdge
-		InnerCols FastIntSet
-	}
+
+	// todo: when multi join and across select block, this may need to be maintained more precisely.
+
 }
 
 // ClosureOfStrict is exported for outer usage.
@@ -212,12 +209,26 @@ func (s *FDSet) ReduceCols(colSet FastIntSet) FastIntSet {
 
 // AddStrictFunctionalDependency is to add `STRICT` functional dependency to the fdGraph.
 func (s *FDSet) AddStrictFunctionalDependency(from, to FastIntSet) {
-	s.addFunctionalDependency(from, to, true, false, false)
+	s.addFunctionalDependency(from, to, true, false)
 }
 
 // AddLaxFunctionalDependency is to add `LAX` functional dependency to the fdGraph.
-func (s *FDSet) AddLaxFunctionalDependency(from, to FastIntSet, laxUnique bool) {
-	s.addFunctionalDependency(from, to, false, false, laxUnique)
+func (s *FDSet) AddLaxFunctionalDependency(from, to FastIntSet) {
+	s.addFunctionalDependency(from, to, false, false)
+}
+
+// AddNCFunctionalDependency is to add conditional functional dependency to the fdGraph.
+func (s *FDSet) AddNCFunctionalDependency(from, to, nc FastIntSet, strict, equiv bool) {
+	// Since nc edge is invisible by now, just collecting them together simply, once the
+	// null-reject on nc cols is satisfied, let's pick them out and insert into the fdEdge
+	// normally.
+	s.ncEdges = append(s.ncEdges, &fdEdge{
+		from:        from,
+		to:          to,
+		strict:      strict,
+		equiv:       equiv,
+		conditionNC: &nc,
+	})
 }
 
 // addFunctionalDependency will add strict/lax functional dependency to the fdGraph.
@@ -228,7 +239,7 @@ func (s *FDSet) AddLaxFunctionalDependency(from, to FastIntSet, laxUnique bool) 
 //
 // To reduce the edge number, we limit the functional dependency when we insert into the
 // set. The key code of insert is like the following codes.
-func (s *FDSet) addFunctionalDependency(from, to FastIntSet, strict, equiv, laxUni bool) {
+func (s *FDSet) addFunctionalDependency(from, to FastIntSet, strict, equiv bool) {
 	// trivial FD, refused.
 	if to.SubsetOf(from) {
 		return
@@ -247,7 +258,6 @@ func (s *FDSet) addFunctionalDependency(from, to FastIntSet, strict, equiv, laxU
 		to:     to,
 		strict: strict,
 		equiv:  equiv,
-		uniLax: laxUni,
 	}
 
 	swapPointer := 0
@@ -265,7 +275,6 @@ func (s *FDSet) addFunctionalDependency(from, to FastIntSet, strict, equiv, laxU
 			fd.to = to
 			fd.strict = strict
 			fd.equiv = equiv
-			fd.uniLax = laxUni
 			added = true
 		} else if !added {
 			// There's a strong one. No need to add.
@@ -432,6 +441,7 @@ func (s *FDSet) AddConstants(cons FastIntSet) {
 					shouldRemoved = true
 				}
 			}
+			// pre-condition NOTE 1 in doc.go, it won't occur duplicate definite determinant of Lax FD.
 			// for strict or lax FDs, both can reduce the dependencies side columns with constant closure.
 			if fd.removeColumnsToSide(cols) {
 				shouldRemoved = true
@@ -508,6 +518,647 @@ func (s *FDSet) EquivalenceCols() (eqs []*FastIntSet) {
 	return eqs
 }
 
+// MakeNotNull modify the FD set based the listed column with NOT NULL flags.
+// Most of the case is used in the derived process after predicate evaluation,
+// which can upgrade lax FDs to strict ones.
+func (s *FDSet) MakeNotNull(notNullCols FastIntSet) {
+	notNullCols.UnionWith(s.NotNullCols)
+	notNullColsSet := s.closureOfEquivalence(notNullCols)
+	// make nc FD visible.
+	for i := 0; i < len(s.ncEdges); i++ {
+		fd := s.ncEdges[i]
+		if fd.conditionNC.Intersects(notNullColsSet) {
+			// condition satisfied.
+			s.ncEdges = append(s.ncEdges[:i], s.ncEdges[i+1:]...)
+			i--
+			if fd.isConstant() {
+				s.AddConstants(fd.to)
+			} else if fd.equiv {
+				s.AddEquivalence(fd.from, fd.to)
+				newNotNullColsSet := s.closureOfEquivalence(notNullColsSet)
+				if !newNotNullColsSet.Difference(notNullColsSet).IsEmpty() {
+					notNullColsSet = newNotNullColsSet
+					// expand not-null set.
+					i = -1
+				}
+			} else {
+				s.addFunctionalDependency(fd.from, fd.to, fd.strict, fd.equiv)
+			}
+		}
+	}
+	// make origin FD strengthened.
+	for i := 0; i < len(s.fdEdges); i++ {
+		fd := s.fdEdges[i]
+		if fd.strict {
+			continue
+		}
+		// unique lax can be made strict only if determinant are not null.
+		if fd.from.SubsetOf(notNullColsSet) {
+			// we don't need to clean the old lax FD because when adding the corresponding strict one, the lax
+			// one will be implied by that and itself is removed.
+			s.AddStrictFunctionalDependency(fd.from, fd.to)
+			// add strict FDs will cause reconstruction of FDSet, re-traverse it.
+			i = -1
+		}
+	}
+	s.NotNullCols = notNullColsSet
+}
+
+// MakeNullable make the fd's NotNullCols to be cleaned, after the both side fds are handled it can be nullable.
+func (s *FDSet) MakeNullable(nullableCols FastIntSet) {
+	s.NotNullCols.DifferenceWith(nullableCols)
+}
+
+// MakeCartesianProduct records fdSet after the impact of Cartesian Product of (T1 x T2) is made.
+// 1: left FD is reserved.
+// 2: right FD is reserved.
+// Actually, for two independent table, FDs won't affect (implies or something) each other, appending
+// them together is adequate. But for constant FDs, according to our definition, we should merge them
+// as a larger superset pointing themselves.
+func (s *FDSet) MakeCartesianProduct(rhs *FDSet) {
+	for i := 0; i < len(rhs.fdEdges); i++ {
+		fd := rhs.fdEdges[i]
+		if fd.isConstant() {
+			// both from or to side is ok since {superset} --> {superset}.
+			s.AddConstants(fd.to)
+		} else {
+			s.fdEdges = append(s.fdEdges, fd)
+		}
+	}
+	// just simple merge the ncEdge from both side together.
+	s.ncEdges = append(s.ncEdges, rhs.ncEdges...)
+	// todo: add strict FD: (left key + right key) -> all cols.
+	// maintain a key?
+}
+
+// MakeOuterJoin generates the records the fdSet of the outer join.
+//
+// We always take the left side as the row-supplying side and the right side as the null-supplying side. (swap it if not)
+// As we know, the outer join would generate null extended rows compared with the inner join.
+// So we cannot do the same thing directly with the inner join. This function deals with the special cases of the outer join.
+//
+// Knowledge:
+// 1: the filter condition related to the lhs column won't filter predicate-allowed rows and refuse null rows (left rows always remain)
+// 2: the filter condition related to the rhs column won't filter NULL rows, although the filter has the not-null attribute. (null-appending happened after that)
+//
+// Notification:
+// 1: the origin FD from the left side (rows-supplying) over the result of outer join filtered are preserved because
+//    it may be duplicated by multi-matching, but actually, they are the same left rows (don't violate FD definition).
+//
+// 2: the origin FD from the right side (nulls-supplying) over the result of outer join filtered may not be valid anymore.
+//
+//		<1> strict FD may be wakened as a lax one. But if at least one non-NULL column is part of the determinant, the
+//			strict FD can be preserved.
+//	        a  b  |  c     d     e
+//			------+----------------
+//		 	1  1  |  1    NULL   1
+//		    1  2  | NULL  NULL  NULL
+//		    2  1  | NULL  NULL  NULL
+//			left join with (a,b) * (c,d,e) on (a=c and b=1), if there is a strict FD {d} -> {e} on the rhs. After supplied
+//			with null values, {d} -> {e} are degraded to a lax one {d} ~~> {e} as you see. the origin and supplied null value
+//			for d column determine different dependency.  NULL -> 1 and NULL -> NULL which breaks strict FD definition.
+//
+//			If the determinant contains at least a not null column for example c here, FD like {c,d} -> {e} can survive
+//			after the left join. Because you can not find two same key, one from the origin rows and the other one from the
+//			supplied rows.
+//
+//			for lax FD, the supplied rows of null values don't affect lax FD itself. So we can keep it.
+//
+//		<2> The FDSet should remove constant FD since null values may be substituted for some unmatched left rows. NULL is not a
+//			constant anymore.
+//
+//      <3> equivalence FD should be removed since substituted null values are not equal to the other substituted null value.
+//
+// 3: the newly added FD from filters should take some consideration as below:
+//
+//	 	<1> strict/lax FD: join key filter conditions can not produce new strict/lax FD yet (knowledge: 1&2).
+//
+//		<2> constant FD from the join conditions is only used for checking other FD. We cannot keep itself.
+//			a   b  |  c     d
+//          -------+---------
+//          1   1  |  1     1
+//          1   2  | NULL NULL
+//          left join with (a,b) * (c,d) on (a=c and d=1), some rhs rows will be substituted with null values, and FD on rhs
+//          {d=1} are lost.
+//
+//          a   b  |  c     d
+//  		-------+---------
+//		    1   1  |  1     1
+//          1   2  | NULL NULL
+//          left join with (a,b) * (c,d) on (a=c and b=1), it only gives the pass to the first matching, lhs other rows are still
+//          kept and appended with null values. So the FD on rhs {b=1} are not applicable to lhs rows.
+//
+//          above all: constant FD are lost
+//
+//		<3.1> equivalence FD: when the left join conditions only contain equivalence FD (EFD for short below) across left and right
+//			cols and no other `LEFT` condition on the (left-side cols except the cols in EFD's from) to filter the left join results. We can maintain the strict
+//			FD from EFD's `from` side to EFD's `to` side over the left join result.
+//			a  b  |  c     d     e
+//			------+----------------
+//		 	1  1  |  1    NULL   1
+//		    1  2  | NULL  NULL  NULL
+//		    2  1  | NULL  NULL  NULL
+//			Neg eg: left join with (a,b) * (c,d,e) on (a=c and b=1), other b=1 will filter the result, causing the left row (1, 2)
+//			miss matched with right row (1, null 1) by a=c, consequently leading the left row appended as (1,2,null,null,null), which
+//			will break the FD: {a} -> {c} for key a=1 with different c=1/null.
+//			a  b  |  c     d     e
+//			------+----------------
+//		 	1  1  | NULL  NULL  NULL
+//		    2  1  | NULL  NULL  NULL
+//			Pos eg: if the filter is on EFD's `from` cols, it's ok. Let's say: (a,b) * (c,d,e) on (a=c and a=2), a=2 only won't leading
+//			same key a with matched c and mismatched NULL, neg case result is changed as above, so strict FD {a} -> {c} can exist.
+//			a  b  |  c     d     e
+//			------+----------------
+//		 	1  1  |  1    NULL   1
+//		    1  2  | NULL  NULL  NULL
+//			2  1  | NULL  NULL  NULL
+//			Neg eg: left join with (a,b) * (c,d,e) on (a=c and b=c), two EFD here, where b=c can also refuse some rows joined by a=c,
+//			consequently applying it with NULL as (1  2  | NULL  NULL  NULL), leading the same key a has different value 1/NULL. But
+//			macroscopically, we can combine {a,b} together as the strict FD's from side, so new FD {a,b} -> {c} is secured. For case
+//			of (a=c and b=ce), the FD is {a, b} -> {c, e}
+//
+// 			conclusion: without this kind of limited left conditions to judge the join match, we can say: FD {a} -> {c} exists.
+//
+//		<3.2> equivalence FD: when the determinant and dependencies from an equivalence FD of join condition are each covering a strict
+//			FD of the left / right side. After joining, we can extend the left side strict FD's dependencies to all cols.
+//			a  b  |  c     d     e
+//			------+----------------
+//		 	1  1  |  1    NULL   1
+//		    2  2  | NULL  NULL  NULL
+//		    3  1  | NULL  NULL  NULL
+//			left join with (a,b) * (c,d,e) on (a=c and b=1). Supposing that left `a` are strict Key and right `c` are strict Key too.
+//			Key means the strict FD can determine all cols from that table.
+//			case 1: left join matched
+//				one left row match one / multi rows from right side, since `c` is strict determine all cols from right table, so
+//              {a} == {b} --> {all cols in right}, according to the transitive rule of strict FD, we get {a} --> {all cols in right}
+//			case 2: left join miss match
+//				miss matched rows from left side are unique originally, even appended with NULL value from right side, they are still
+//				strictly determine themselves and even the all rows after left join.
+//			conclusion combined:
+//				If there is an equivalence covering both strict Key from the right and left, we can create a new strict FD: {columns of the left side of the join in the equivalence} -> {all columns after join}.
+//
+//		<3.3> equivalence FD: let's see equivalence FD as double-directed strict FD from join equal conditions, and we  only keep the
+//			rhs ~~> lhs.
+//			a  b  |  c     d     e
+//			------+----------------
+//		 	1  1  |  1    NULL   1
+//		    1  2  | NULL  NULL  NULL
+//		    2  1  | NULL  NULL  NULL
+//			left join with (a,b) * (c,d,e) on (a=c and b=1). From the join equivalence condition can derive a new FD {ac} == {ac}.
+//			while since there are some supplied null value in the c column, we don't guarantee {ac} == {ac} yet, so do {a} -> {c}
+//			because two same determinant key {1} can point to different dependency {1} & {NULL}. But in return, FD like {c} -> {a}
+//			are degraded to the corresponding lax one.
+//
+// 4: the new formed FD {left primary key, right primary key} -> {all columns} are preserved in spite of the null-supplied rows.
+// 5: There's no join key and no filters from the outer side. The join case is a cartesian product. In this case,
+//    the strict equivalence classes still exist.
+//      - If the right side has no row, we will supply null-extended rows, then the value of any column is NULL, and the equivalence class exists.
+//      - If the right side has rows, no row is filtered out after the filters since no row of the outer side is filtered out. Hence, the equivalence class remains.
+//
+func (s *FDSet) MakeOuterJoin(innerFDs, filterFDs *FDSet, outerCols, innerCols FastIntSet, opt *ArgOpts) {
+	//  copy down the left PK and right PK before the s has changed for later usage.
+	leftPK, ok1 := s.FindPrimaryKey()
+	rightPK, ok2 := innerFDs.FindPrimaryKey()
+	copyLeftFDSet := &FDSet{}
+	copyLeftFDSet.AddFrom(s)
+	copyRightFDSet := &FDSet{}
+	copyRightFDSet.AddFrom(innerFDs)
+
+	for _, edge := range innerFDs.fdEdges {
+		// Rule #2.2, constant FD are removed from right side of left join.
+		if edge.isConstant() {
+			continue
+		}
+		// Rule #2.3, equivalence FD are removed from right side of left join.
+		if edge.equiv {
+			continue
+		}
+		// Rule #2.1, lax FD can be kept after the left join.
+		if !edge.strict {
+			s.addFunctionalDependency(edge.from, edge.to, edge.strict, edge.equiv)
+			continue
+		}
+		// Rule #2.1, strict FD can be kept when determinant contains not null column, otherwise, downgraded to the lax one.
+		//
+		// If the one of the column from the inner child's functional dependency's left side is not null, this FD can be remained.
+		// This is because that the outer join would generate null-extended rows. So if at least one row from the left side
+		// is not null. We can guarantee that the there's no same part between the original rows and the generated rows.
+		// So the null extended rows would not break the original functional dependency.
+		if edge.from.Intersects(innerFDs.NotNullCols) {
+			// One of determinant are not null column, strict FD are kept.
+			// According knowledge #2, we can't take use of right filter's not null attribute.
+			s.addFunctionalDependency(edge.from, edge.to, edge.strict, edge.equiv)
+		} else {
+			// Otherwise, the strict FD are downgraded to a lax one.
+			s.addFunctionalDependency(edge.from, edge.to, false, edge.equiv)
+		}
+	}
+	s.ncEdges = append(s.ncEdges, innerFDs.ncEdges...)
+	leftCombinedFDFrom := NewFastIntSet()
+	leftCombinedFDTo := NewFastIntSet()
+	for _, edge := range filterFDs.fdEdges {
+		// Rule #3.2, constant FD are removed from right side of left join.
+		if edge.isConstant() {
+			s.AddNCFunctionalDependency(edge.from, edge.to, innerCols, edge.strict, edge.equiv)
+			continue
+		}
+		// Rule #3.3, we only keep the lax FD from right side pointing the left side.
+		if edge.equiv {
+			equivColsRight := edge.from.Intersection(innerCols)
+			equivColsLeft := edge.from.Intersection(outerCols)
+			// equivalence: {superset} --> {superset}, either `from` or `to` side is ok here.
+			// Rule 3.3.1
+			if !opt.SkipFDRule331 {
+				if equivColsLeft.Len() > 0 && equivColsRight.Len() > 0 {
+					leftCombinedFDFrom.UnionWith(equivColsLeft)
+					leftCombinedFDTo.UnionWith(equivColsRight)
+				}
+			}
+
+			// Rule 3.3.2
+			rightAllCols := copyRightFDSet.AllCols()
+			leftAllCols := copyLeftFDSet.AllCols()
+			coveringStrictKeyRight := rightAllCols.SubsetOf(copyRightFDSet.ClosureOfStrict(equivColsRight))
+			coveringStrictKeyLeft := leftAllCols.SubsetOf(copyLeftFDSet.closureOfStrict(equivColsLeft))
+			if coveringStrictKeyLeft && coveringStrictKeyRight {
+				// find the minimum strict Key set, and add
+				s.addFunctionalDependency(copyLeftFDSet.ReduceCols(equivColsLeft), rightAllCols.Union(leftAllCols), true, false)
+			}
+
+			// Rule 3.3.3
+			// need to break down the superset of equivalence, adding each lax FD of them.
+			laxFDFrom := equivColsRight
+			laxFDTo := equivColsLeft
+			for i, ok := laxFDFrom.Next(0); ok; i, ok = laxFDFrom.Next(i + 1) {
+				for j, ok := laxFDTo.Next(0); ok; j, ok = laxFDTo.Next(j + 1) {
+					s.addFunctionalDependency(NewFastIntSet(i), NewFastIntSet(j), false, false)
+				}
+			}
+			s.AddNCFunctionalDependency(equivColsLeft, equivColsRight, innerCols, true, true)
+		}
+		// Rule #3.1, filters won't produce any strict/lax FDs.
+	}
+	// Rule #3.3.1 combinedFD case
+	if !opt.SkipFDRule331 {
+		s.addFunctionalDependency(leftCombinedFDFrom, leftCombinedFDTo, true, false)
+	}
+
+	// Rule #4, add new FD {left key + right key} -> {all columns} if it could.
+	if ok1 && ok2 {
+		s.addFunctionalDependency(leftPK.Union(*rightPK), outerCols.Union(innerCols), true, false)
+	}
+
+	// Rule #5, adding the strict equiv edges if there's no join key and no filters from outside.
+	if opt.OnlyInnerFilter {
+		if opt.InnerIsFalse {
+			s.AddConstants(innerCols)
+		} else {
+			for _, edge := range filterFDs.fdEdges {
+				// keep filterFD's constant and equivalence.
+				if edge.strict && (edge.equiv || edge.from.IsEmpty()) {
+					s.addFunctionalDependency(edge.from, edge.to, edge.strict, edge.equiv)
+				}
+			}
+			// keep all FDs from inner side.
+			for _, edge := range innerFDs.fdEdges {
+				s.addFunctionalDependency(edge.from, edge.to, edge.strict, edge.equiv)
+			}
+		}
+	}
+
+	// merge the not-null-cols/registered-map from both side together.
+	s.NotNullCols.UnionWith(filterFDs.NotNullCols)
+	// inner cols can be nullable since then.
+	s.NotNullCols.DifferenceWith(innerCols)
+	if s.HashCodeToUniqueID == nil {
+		s.HashCodeToUniqueID = innerFDs.HashCodeToUniqueID
+	} else {
+		for k, v := range innerFDs.HashCodeToUniqueID {
+			if _, ok := s.HashCodeToUniqueID[k]; ok {
+				logutil.BgLogger().Warn("Error occurred when building the functional dependency")
+			}
+			s.HashCodeToUniqueID[k] = v
+		}
+	}
+	for i, ok := innerFDs.GroupByCols.Next(0); ok; i, ok = innerFDs.GroupByCols.Next(i + 1) {
+		s.GroupByCols.Insert(i)
+	}
+	s.HasAggBuilt = s.HasAggBuilt || innerFDs.HasAggBuilt
+}
+
+// ArgOpts contains some arg used for FD maintenance.
+type ArgOpts struct {
+	SkipFDRule331   bool
+	OnlyInnerFilter bool
+	InnerIsFalse    bool
+}
+
+// FindPrimaryKey checks whether there's a key in the current set which implies key -> all cols.
+func (s FDSet) FindPrimaryKey() (*FastIntSet, bool) {
+	allCols := s.AllCols()
+	for i := 0; i < len(s.fdEdges); i++ {
+		fd := s.fdEdges[i]
+		// Since we haven't maintained the key column, let's traverse every strict FD to judge with.
+		if fd.strict && !fd.equiv {
+			closure := s.closureOfStrict(fd.from)
+			if allCols.SubsetOf(closure) {
+				pk := NewFastIntSet()
+				pk.CopyFrom(fd.from)
+				return &pk, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// AllCols returns all columns in the current set.
+func (s FDSet) AllCols() FastIntSet {
+	allCols := NewFastIntSet()
+	for i := 0; i < len(s.fdEdges); i++ {
+		allCols.UnionWith(s.fdEdges[i].from)
+		if !s.fdEdges[i].equiv {
+			allCols.UnionWith(s.fdEdges[i].to)
+		}
+	}
+	return allCols
+}
+
+// AddFrom merges two FD sets by adding each FD from the given set to this set.
+// Since two different tables may have some column ID overlap, we better use
+// column unique ID to build the FDSet instead.
+func (s *FDSet) AddFrom(fds *FDSet) {
+	for i := range fds.fdEdges {
+		fd := fds.fdEdges[i]
+		if fd.equiv {
+			s.addEquivalence(fd.from)
+		} else if fd.isConstant() {
+			s.AddConstants(fd.to)
+		} else if fd.strict {
+			s.AddStrictFunctionalDependency(fd.from, fd.to)
+		} else {
+			s.AddLaxFunctionalDependency(fd.from, fd.to)
+		}
+	}
+	for i := range fds.ncEdges {
+		fd := fds.ncEdges[i]
+		s.ncEdges = append(s.ncEdges, fd)
+	}
+	s.NotNullCols.UnionWith(fds.NotNullCols)
+	if s.HashCodeToUniqueID == nil {
+		s.HashCodeToUniqueID = fds.HashCodeToUniqueID
+	} else {
+		for k, v := range fds.HashCodeToUniqueID {
+			if _, ok := s.HashCodeToUniqueID[k]; ok {
+				logutil.BgLogger().Warn("Error occurred when building the functional dependency")
+				continue
+			}
+			s.HashCodeToUniqueID[k] = v
+		}
+	}
+	for i, ok := fds.GroupByCols.Next(0); ok; i, ok = fds.GroupByCols.Next(i + 1) {
+		s.GroupByCols.Insert(i)
+	}
+	s.HasAggBuilt = fds.HasAggBuilt
+}
+
+// MaxOneRow will regard every column in the fdSet as a constant. Since constant is stronger that strict FD, it will
+// take over all existed strict/lax FD, only keeping the equivalence. Because equivalence is stronger than constant.
+//
+//   f:      {a}--> {b,c}, {abc} == {abc}
+//   cols:   {a,c}
+//   result: {} --> {a,c}, {a,c} == {a,c}
+func (s *FDSet) MaxOneRow(cols FastIntSet) {
+	cnt := 0
+	for i := 0; i < len(s.fdEdges); i++ {
+		fd := s.fdEdges[i]
+		// non-equivalence FD, skip it.
+		if !fd.equiv {
+			continue
+		}
+		// equivalence: {superset} --> {superset}
+		if cols.Intersects(fd.from) {
+			s.fdEdges[cnt] = &fdEdge{
+				from:   fd.from.Intersection(cols),
+				to:     fd.to.Intersection(cols),
+				strict: true,
+				equiv:  true,
+			}
+			cnt++
+		}
+	}
+	s.fdEdges = s.fdEdges[:cnt]
+	// At last, add the constant FD, {} --> {cols}
+	if !cols.IsEmpty() {
+		s.fdEdges = append(s.fdEdges, &fdEdge{
+			to:     cols,
+			strict: true,
+		})
+	}
+}
+
+// ProjectCols projects FDSet to the target columns
+// Formula:
+// Strict decomposition FD4A: If X −→ Y Z then X −→ Y and X −→ Z.
+// Lax decomposition FD4B: If X ~→ Y Z and I(R) is Y-definite then X ~→ Z.
+func (s *FDSet) ProjectCols(cols FastIntSet) {
+	// **************************************** START LOOP 1 ********************************************
+	// Ensure the transitive relationship between remaining columns won't be lost.
+	// 1: record all the constant columns
+	// 2: if an FD's to side contain un-projected column, substitute it with its closure.
+	// 		fd1: {a} --> {b,c}
+	//	    fd2: {b} --> {d}
+	//      when b is un-projected, the fd1 should be {a} --> {b,c's closure} which is {a} --> {b,c,d}
+	// 3: track all columns that have equivalent alternates that are part of the projection.
+	//		fd1: {a} --> {c}
+	//      fd2: {a,b} == {a,b}
+	//      if only a is un-projected, the fd1 can actually be kept as {b} --> {c}.
+	var constCols, detCols, equivCols FastIntSet
+	for i := 0; i < len(s.fdEdges); i++ {
+		fd := s.fdEdges[i]
+
+		if fd.isConstant() {
+			constCols = fd.to
+		}
+
+		if !fd.to.SubsetOf(cols) {
+			// equivalence FD has been the closure as {superset} == {superset}.
+			if !fd.equiv && fd.strict {
+				// extended the `to` as it's complete closure, in case of missing some transitive FDs.
+				fd.to = s.closureOfStrict(fd.to.Union(fd.from))
+				fd.to.DifferenceWith(fd.from)
+			}
+		}
+
+		// {a,b} --> {c}, when b is un-projected, this FD should be handled latter, recording `b` here.
+		if !fd.equiv && !fd.from.SubsetOf(cols) {
+			detCols.UnionWith(fd.from.Difference(cols))
+		}
+
+		// equivalence {superset} == {superset}
+		if fd.equiv && fd.from.Intersects(cols) {
+			equivCols.UnionWith(fd.from)
+		}
+	}
+	// ****************************************** END LOOP 1 ********************************************
+
+	// find deleted columns with equivalence.
+	detCols.IntersectionWith(equivCols)
+	equivMap := s.makeEquivMap(detCols, cols)
+
+	// it's actually maintained already.
+	if !constCols.IsEmpty() {
+		s.AddConstants(constCols)
+	}
+
+	// **************************************** START LOOP 2 ********************************************
+	// leverage the information collected in the loop1 above and try to do some FD substitution.
+	var (
+		cnt    int
+		newFDs []*fdEdge
+	)
+	for i := range s.fdEdges {
+		fd := s.fdEdges[i]
+
+		// step1: clear the `to` side
+		// subtract out un-projected columns from dependants.
+		// subtract out strict constant columns from dependants.
+		if !fd.to.SubsetOf(cols) {
+			// since loop 1 has computed the complete transitive closure for strict FD, now as:
+			// 1: equivalence FD: {superset} == {superset}
+			// 2: strict FD: {xxx} --> {complete closure}
+			// 3: lax FD: {xxx} ~~> {yyy}
+			if fd.equiv {
+				// As formula FD4A above, delete from un-projected column from `to` side directly.
+				fd.to = fd.to.Intersection(cols)
+				// Since from are the same, delete it too here.
+				fd.from = fd.from.Intersection(cols)
+			} else if fd.strict {
+				// As formula FD4A above, delete from un-projected column from `to` side directly.
+				fd.to = fd.to.Intersection(cols)
+			} else {
+				// As formula FD4B above, only if the deleted columns are definite, then we can keep it.
+				deletedCols := fd.to.Difference(cols)
+				if deletedCols.SubsetOf(constCols) {
+					fd.to = fd.to.Intersection(cols)
+				} else if deletedCols.SubsetOf(s.NotNullCols) {
+					fd.to = fd.to.Intersection(cols)
+				} else {
+					continue
+				}
+			}
+
+			if !fd.isConstant() {
+				// clear the constant columns in the dependency of FD.
+				if fd.removeColumnsToSide(constCols) {
+					continue
+				}
+			}
+			// from and to side of equiv are same, don't do trivial elimination.
+			if !fd.isEquivalence() {
+				if fd.removeColumnsToSide(fd.from) {
+					// fd.to side is empty, remove this FD.
+					continue
+				}
+			}
+		}
+
+		// step2: clear the `from` side
+		// substitute the equivalence columns for removed determinant columns.
+		if !fd.from.SubsetOf(cols) {
+			// equivalence and constant FD couldn't be here.
+			deletedCols := fd.from.Difference(cols)
+			substitutedCols := NewFastIntSet()
+			foundAll := true
+			for c, ok := deletedCols.Next(0); ok; c, ok = deletedCols.Next(c + 1) {
+				// For every un-projected column, try to found their substituted column in projection list.
+				var id int
+				if id, foundAll = equivMap[c]; !foundAll {
+					break
+				}
+				substitutedCols.Insert(id)
+			}
+			if foundAll {
+				// deleted columns can be remapped using equivalencies.
+				from := fd.from.Union(substitutedCols)
+				from.DifferenceWith(deletedCols)
+				newFDs = append(newFDs, &fdEdge{
+					from:   from,
+					to:     fd.to,
+					strict: fd.strict,
+					equiv:  fd.equiv,
+				})
+			}
+			continue
+		}
+
+		if cnt != i {
+			s.fdEdges[cnt] = s.fdEdges[i]
+		}
+		cnt++
+	}
+	s.fdEdges = s.fdEdges[:cnt]
+	// ****************************************** END LOOP 2 ********************************************
+
+	for i := range newFDs {
+		fd := newFDs[i]
+		if fd.equiv {
+			s.addEquivalence(fd.from)
+		} else if fd.isConstant() {
+			s.AddConstants(fd.to)
+		} else if fd.strict {
+			s.AddStrictFunctionalDependency(fd.from, fd.to)
+		} else {
+			s.AddLaxFunctionalDependency(fd.from, fd.to)
+		}
+	}
+	// ncEdge should also be projected.
+	for i := 0; i < len(s.ncEdges); i++ {
+		nc := s.ncEdges[i]
+		if !nc.conditionNC.Intersects(cols) {
+			// edge is projected out, the nc edge's condition won't be satisfied anymore.
+			continue
+		}
+		if nc.isConstant() {
+			nc.to.IntersectionWith(cols)
+			if nc.to.IsEmpty() {
+				// edge is projected out.
+				s.ncEdges = append(s.ncEdges[:i], s.ncEdges[i+1:]...)
+				i--
+			}
+			continue
+		}
+		if nc.equiv {
+			nc.from.IntersectionWith(cols)
+			nc.to.IntersectionWith(cols)
+			if nc.from.IsEmpty() {
+				// edge is projected out.
+				s.ncEdges = append(s.ncEdges[:i], s.ncEdges[i+1:]...)
+				i--
+			}
+		}
+	}
+}
+
+// makeEquivMap try to find the equivalence column of every deleted column in the project list.
+func (s *FDSet) makeEquivMap(detCols, projectedCols FastIntSet) map[int]int {
+	var equivMap map[int]int
+	for i, ok := detCols.Next(0); ok; i, ok = detCols.Next(i + 1) {
+		var oneCol FastIntSet
+		oneCol.Insert(i)
+		closure := s.closureOfEquivalence(oneCol)
+		closure.IntersectionWith(projectedCols)
+		// the column to be deleted has an equivalence column exactly in the project list.
+		if !closure.IsEmpty() {
+			if equivMap == nil {
+				equivMap = make(map[int]int)
+			}
+			id, _ := closure.Next(0) // We can record more equiv columns.
+			equivMap[i] = id
+		}
+	}
+	return equivMap
+}
+
 // String returns format string of this FDSet.
 func (s *FDSet) String() string {
 	var builder strings.Builder
@@ -526,7 +1177,8 @@ func (e *fdEdge) String() string {
 	var b strings.Builder
 	if e.equiv {
 		if !e.strict {
-			panic(errors.New("lax equivalent columns are not supported"))
+			logutil.BgLogger().Warn("Error occurred when building the functional dependency. We don't support lax equivalent columns")
+			return "Wrong functional dependency"
 		}
 		_, _ = fmt.Fprintf(&b, "%s==%s", e.from, e.to)
 	} else {
@@ -537,4 +1189,27 @@ func (e *fdEdge) String() string {
 		}
 	}
 	return b.String()
+}
+
+// RegisterUniqueID is used to record the map relationship between expr and allocated uniqueID.
+func (s *FDSet) RegisterUniqueID(hashCode string, uniqueID int) {
+	if len(hashCode) == 0 {
+		// shouldn't be here.
+		logutil.BgLogger().Warn("Error occurred when building the functional dependency")
+		return
+	}
+	if _, ok := s.HashCodeToUniqueID[hashCode]; ok {
+		// shouldn't be here.
+		logutil.BgLogger().Warn("Error occurred when building the functional dependency")
+		return
+	}
+	s.HashCodeToUniqueID[hashCode] = uniqueID
+}
+
+// IsHashCodeRegistered checks whether the given hashcode has been registered in the current set.
+func (s *FDSet) IsHashCodeRegistered(hashCode string) (int, bool) {
+	if uniqueID, ok := s.HashCodeToUniqueID[hashCode]; ok {
+		return uniqueID, true
+	}
+	return -1, false
 }

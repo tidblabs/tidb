@@ -24,14 +24,11 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/tidb/ddl/placement"
-	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
 	plannercore "github.com/pingcap/tidb/planner/core"
 	"github.com/pingcap/tidb/session"
 	"github.com/pingcap/tidb/sessionctx/variable"
-	"github.com/pingcap/tidb/table/tables"
 	"github.com/pingcap/tidb/testkit"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/kvcache"
@@ -815,9 +812,16 @@ func TestCollateStringFunction(t *testing.T) {
 	tk.MustQuery("select locate('S', 'a' collate utf8mb4_general_ci);").Check(testkit.Rows("0"))
 	// MySQL return 0 here, I believe it is a bug in MySQL since 'ß' == 's' under utf8mb4_general_ci collation.
 	tk.MustQuery("select locate('ß', 's' collate utf8mb4_general_ci);").Check(testkit.Rows("1"))
+	tk.MustQuery("select locate('world', 'hello world' collate utf8mb4_general_ci);").Check(testkit.Rows("7"))
+	tk.MustQuery("select locate(' ', 'hello world' collate utf8mb4_general_ci);").Check(testkit.Rows("6"))
+	tk.MustQuery("select locate('  ', 'hello world' collate utf8mb4_general_ci);").Check(testkit.Rows("0"))
+
 	tk.MustQuery("select locate('S', 's' collate utf8mb4_unicode_ci);").Check(testkit.Rows("1"))
 	tk.MustQuery("select locate('S', 'a' collate utf8mb4_unicode_ci);").Check(testkit.Rows("0"))
 	tk.MustQuery("select locate('ß', 'ss' collate utf8mb4_unicode_ci);").Check(testkit.Rows("1"))
+	tk.MustQuery("select locate('world', 'hello world' collate utf8mb4_unicode_ci);").Check(testkit.Rows("7"))
+	tk.MustQuery("select locate(' ', 'hello world' collate utf8mb4_unicode_ci);").Check(testkit.Rows("6"))
+	tk.MustQuery("select locate('  ', 'hello world' collate utf8mb4_unicode_ci);").Check(testkit.Rows("0"))
 
 	tk.MustExec("truncate table t1;")
 	tk.MustExec("insert into t1 (a) values (1);")
@@ -2114,6 +2118,13 @@ func TestTimeBuiltin(t *testing.T) {
 	result.Check(testkit.Rows("<nil> <nil> <nil> 2017-01-01 11:29:30 2017-01-01 11:29:30 <nil> <nil>"))
 	tk.MustQuery("select subtime(cast('10:10:10' as time), cast('9:10:10' as time))").Check(testkit.Rows("01:00:00"))
 	tk.MustQuery("select subtime('10:10:10', cast('9:10:10' as time))").Check(testkit.Rows("01:00:00"))
+
+	// SUBTIME issue #31868
+	tk.MustExec("drop table if exists t")
+	tk.MustExec("create table t(a DATETIME(6))")
+	tk.MustExec(`insert into t values ("1000-01-01 01:00:00.000000"), ("1000-01-01 01:00:00.000001")`)
+	tk.MustQuery(`SELECT SUBTIME(a, '00:00:00.000001') FROM t ORDER BY a;`).Check(testkit.Rows("1000-01-01 00:59:59.999999", "1000-01-01 01:00:00.000000"))
+	tk.MustQuery(`SELECT SUBTIME(a, '10:00:00.000001') FROM t ORDER BY a;`).Check(testkit.Rows("0999-12-31 14:59:59.999999", "0999-12-31 15:00:00.000000"))
 
 	// ADDTIME & SUBTIME issue #5966
 	tk.MustExec("drop table if exists t")
@@ -3748,9 +3759,6 @@ func TestPreparePlanCache(t *testing.T) {
 
 	tk := testkit.NewTestKit(t, store)
 
-	// Plan cache should now be off by default
-	require.False(t, plannercore.PreparedPlanCacheEnabled())
-
 	orgEnable := plannercore.PreparedPlanCacheEnabled()
 	defer func() {
 		plannercore.SetPreparedPlanCache(orgEnable)
@@ -3802,6 +3810,7 @@ func TestPreparePlanCacheOnCachedTable(t *testing.T) {
 			readFromTableCache = true
 			break
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	require.True(t, readFromTableCache)
 	// already read cache after reading first time
@@ -4176,8 +4185,6 @@ func TestNoopFunctions(t *testing.T) {
 		"SELECT * FROM t1 LOCK IN SHARE MODE",
 		"SELECT * FROM t1 GROUP BY a DESC",
 		"SELECT * FROM t1 GROUP BY a ASC",
-		"SELECT GET_LOCK('acdc', 10)",
-		"SELECT RELEASE_LOCK('acdc')",
 	}
 
 	for _, stmt := range stmts {
@@ -4305,51 +4312,30 @@ func TestIssue20128(t *testing.T) {
 }
 
 func TestCrossDCQuery(t *testing.T) {
-	store, dom, clean := testkit.CreateMockStoreAndDomain(t)
+	store, _, clean := testkit.CreateMockStoreAndDomain(t)
 	defer clean()
 
 	tk := testkit.NewTestKit(t, store)
 	tk.MustExec("use test")
 	tk.MustExec("drop table if exists t1")
+	tk.MustExec("drop placement policy if exists p1")
+	tk.MustExec("drop placement policy if exists p2")
+	tk.MustExec("create placement policy p1 leader_constraints='[+zone=sh]'")
+	tk.MustExec("create placement policy p2 leader_constraints='[+zone=bj]'")
 	tk.MustExec(`create table t1 (c int primary key, d int,e int,index idx_d(d),index idx_e(e))
 PARTITION BY RANGE (c) (
-	PARTITION p0 VALUES LESS THAN (6),
-	PARTITION p1 VALUES LESS THAN (11)
+	PARTITION p0 VALUES LESS THAN (6) placement policy p1,
+	PARTITION p1 VALUES LESS THAN (11) placement policy p2
 );`)
-	defer tk.MustExec("drop table if exists t1")
+	defer func() {
+		tk.MustExec("drop table if exists t1")
+		tk.MustExec("drop placement policy if exists p1")
+		tk.MustExec("drop placement policy if exists p2")
+	}()
 
 	tk.MustExec(`insert into t1 (c,d,e) values (1,1,1);`)
 	tk.MustExec(`insert into t1 (c,d,e) values (2,3,5);`)
 	tk.MustExec(`insert into t1 (c,d,e) values (3,5,7);`)
-
-	is := dom.InfoSchema()
-
-	tb, err := is.TableByName(model.NewCIStr("test"), model.NewCIStr("t1"))
-	require.NoError(t, err)
-	setBundle := func(parName, dc string) {
-		pid, err := tables.FindPartitionByName(tb.Meta(), parName)
-		require.NoError(t, err)
-		groupID := placement.GroupID(pid)
-		is.SetBundle(&placement.Bundle{
-			ID: groupID,
-			Rules: []*placement.Rule{
-				{
-					GroupID: groupID,
-					Role:    placement.Leader,
-					Count:   1,
-					Constraints: []placement.Constraint{
-						{
-							Key:    placement.DCLabelKey,
-							Op:     placement.In,
-							Values: []string{dc},
-						},
-					},
-				},
-			},
-		})
-	}
-	setBundle("p0", "sh")
-	setBundle("p1", "bj")
 
 	testcases := []struct {
 		name      string
