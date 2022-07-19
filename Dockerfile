@@ -13,17 +13,15 @@
 # limitations under the License.
 
 # Builder image
-FROM golang:1.18.1-alpine as builder
+FROM golang:1.18.3-bullseye as builder
 
-RUN apk add --no-cache \
+RUN apt install -y \
     wget \
     make \
     git \
-    gcc \
-    binutils-gold \
-    musl-dev
+    gcc
 
-RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_amd64 \
+RUN wget -O /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_aarch64 \
  && chmod +x /usr/local/bin/dumb-init
 
 RUN mkdir -p /go/src/github.com/pingcap/tidb
@@ -32,6 +30,9 @@ WORKDIR /go/src/github.com/pingcap/tidb
 # Cache dependencies
 COPY go.mod .
 COPY go.sum .
+COPY parser/go.mod parser/go.mod
+COPY parser/go.sum parser/go.sum
+
 
 RUN GO111MODULE=on go mod download
 
@@ -40,10 +41,8 @@ COPY . .
 RUN make
 
 # Executable image
-FROM alpine
-
-RUN apk add --no-cache \
-    curl
+FROM debian:bullseye-slim
+RUN apt update && apt install -y bash curl && rm /bin/sh && ln -s /bin/bash /bin/sh && apt-get clean
 
 COPY --from=builder /go/src/github.com/pingcap/tidb/bin/tidb-server /tidb-server
 COPY --from=builder /usr/local/bin/dumb-init /usr/local/bin/dumb-init
