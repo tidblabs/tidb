@@ -1036,6 +1036,11 @@ func InitializeConfig(confPath string, configCheck, configStrict bool, enforceCm
 		if err == nil {
 			cfg.Tenant.TenantId = uint16(tenantId)
 			cfg.Tenant.IsTenant = true
+		} else {
+			if err := loadTenantIDFromClusterName(cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to get tenant id: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
 
