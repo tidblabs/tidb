@@ -753,6 +753,8 @@ type Tenant struct {
 	IsTenant bool `toml:"is-tenant" json:"is-tenant""`
 	// TenantId set the tenant id for the TiDB server
 	TenantId uint16 `toml:"tenant-id" json:"tenant-id"`
+	// Throttling mode is on or off
+	Throttling bool `toml:"throttling" json:"throttling"`
 }
 
 // Experimental controls the features that are still experimental: their semantics, interfaces are subject to change.
@@ -1053,6 +1055,9 @@ func InitializeConfig(confPath string, configCheck, configStrict bool, enforceCm
 		fmt.Fprintln(os.Stderr, "load config file:", confPath)
 		fmt.Fprintln(os.Stderr, "invalid config", err)
 		os.Exit(1)
+	}
+	if cfg.Tenant.IsTenant {
+		logutil.BgLogger().Info("Multi Tenant Enabled", zap.Uint16("Tenant ID", cfg.Tenant.TenantId))
 	}
 	if configCheck {
 		fmt.Println("config check successful")

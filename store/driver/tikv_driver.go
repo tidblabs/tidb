@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/errors"
 	deadlockpb "github.com/pingcap/kvproto/pkg/deadlock"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
+	tidb_config "github.com/pingcap/tidb/config"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/store/copr"
 	derr "github.com/pingcap/tidb/store/driver/error"
@@ -193,10 +194,13 @@ func IsTiKVStorage(s kv.Storage) bool {
 
 // SetUpTenantContorller sets up tenant controller.
 func SetUpTenantContorller(tenantID uint64, s kv.Storage, id string) error {
+	if !tidb_config.GetGlobalConfig().Tenant.Throttling {
+		return nil
+	}
 	var store *tikvStore
 	var ok = false
 	if store, ok = s.(*tikvStore); !ok {
-		errors.New("invalid storage")
+		return errors.New("invalid storage")
 	}
 	tenantKVControllor, err := tenantcost.NewTenantSideCostController(tenantID, store.GetPDClient())
 	if err != nil {
