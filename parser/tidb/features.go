@@ -28,6 +28,8 @@ const (
 	FeatureIDForceAutoInc = "force_inc"
 	// FeatureIDPlacement is the `placement rule` feature.
 	FeatureIDPlacement = "placement"
+	// FeatureIDSequence is the `resource group` feature.
+	FeatureIDResouceGroup = "resource_group"
 )
 
 var featureIDs = map[string]struct{}{

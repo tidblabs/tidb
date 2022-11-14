@@ -531,6 +531,7 @@ import (
 	replicas              "REPLICAS"
 	replication           "REPLICATION"
 	required              "REQUIRED"
+	resource              "RESOURCE"
 	respect               "RESPECT"
 	restart               "RESTART"
 	restore               "RESTORE"
@@ -718,6 +719,9 @@ import (
 	voter                 "VOTER"
 	voterConstraints      "VOTER_CONSTRAINTS"
 	voters                "VOTERS"
+	ioBandwidth           "IO_BANDWIDTH"
+	ioReadBandwidth       "IO_READ_BANDWIDTH"
+	ioWriteBandwidth      "IO_WRITE_BANDWIDTH"
 
 	/* The following tokens belong to TiDBKeyword. Notice: make sure these tokens are contained in TiDBKeyword. */
 	admin                      "ADMIN"
@@ -863,6 +867,7 @@ import (
 	AlterImportStmt            "ALTER IMPORT statement"
 	AlterInstanceStmt          "Alter instance statement"
 	AlterPolicyStmt            "Alter Placement Policy statement"
+	AlterResourceGroupStmt     "Alter Resource Group statement"
 	AlterSequenceStmt          "Alter sequence statement"
 	AnalyzeTableStmt           "Analyze table statement"
 	BeginTransactionStmt       "BEGIN TRANSACTION statement"
@@ -878,6 +883,7 @@ import (
 	CreateImportStmt           "CREATE IMPORT statement"
 	CreateBindingStmt          "CREATE BINDING  statement"
 	CreatePolicyStmt           "CREATE PLACEMENT POLICY statement"
+	CreateResourceGroupStmt    "CREATE RESOURCE GROUP statement"
 	CreateSequenceStmt         "CREATE SEQUENCE statement"
 	CreateStatisticsStmt       "CREATE STATISTICS statement"
 	DoStmt                     "Do statement"
@@ -1344,6 +1350,8 @@ import (
 	PlacementPolicyOption                  "Anonymous or placement policy option"
 	DirectPlacementOption                  "Subset of anonymous or direct placement option"
 	PlacementOptionList                    "Anomymous or direct placement option list"
+	DirectResourceGroupOption              "Subset of anonymous or direct resource group option"
+	ResourceGroupOptionList                "Anomymous or direct resource group option list"
 	AttributesOpt                          "Attributes options"
 	AllColumnsOrPredicateColumnsOpt        "all columns or predicate columns option"
 	StatsOptionsOpt                        "Stats options"
@@ -1409,6 +1417,7 @@ import (
 	ColumnFormat                    "Column format"
 	DBName                          "Database Name"
 	PolicyName                      "Placement Policy Name"
+	RGroupName                      "Resource Group Name"
 	ExplainFormatType               "explain format type"
 	FieldAsName                     "Field alias name"
 	FieldAsNameOpt                  "Field alias name opt"
@@ -1561,6 +1570,38 @@ AlterTableStmt:
 			PartitionNames: $7.([]model.CIStr),
 			ReplicaKind:    ast.CompactReplicaKindTiFlash,
 		}
+	}
+
+ResourceGroupOptionList:
+	DirectResourceGroupOption
+	{
+		$$ = []*ast.ResourceGroupOption{$1.(*ast.ResourceGroupOption)}
+	}
+|	ResourceGroupOptionList DirectResourceGroupOption
+	{
+		$$ = append($1.([]*ast.ResourceGroupOption), $2.(*ast.ResourceGroupOption))
+	}
+|	ResourceGroupOptionList ',' DirectResourceGroupOption
+	{
+		$$ = append($1.([]*ast.ResourceGroupOption), $3.(*ast.ResourceGroupOption))
+	}
+
+DirectResourceGroupOption:
+	"CPU" EqOpt stringLit
+	{
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitCPU, StrValue: $3}
+	}
+|	"IO_BANDWIDTH" EqOpt stringLit
+	{
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIORate, StrValue: $3}
+	}
+|	"IO_READ_BANDWIDTH" EqOpt stringLit
+	{
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOReadRate, StrValue: $3}
+	}
+|	"IO_WRITE_BANDWIDTH" EqOpt stringLit
+	{
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOWriteRate, StrValue: $3}
 	}
 
 PlacementOptionList:
@@ -3852,6 +3893,9 @@ DBName:
 PolicyName:
 	Identifier
 
+RGroupName:
+	Identifier
+
 DatabaseOption:
 	DefaultKwdOpt CharsetKw EqOpt CharsetName
 	{
@@ -6128,6 +6172,7 @@ UnReservedKeyword:
 |	"REBUILD"
 |	"REDUNDANT"
 |	"REORGANIZE"
+|	"RESOURCE"
 |	"RESTART"
 |	"ROLE"
 |	"ROLLBACK"
@@ -6516,6 +6561,9 @@ NotKeywordToken:
 |	"FOLLOWER_CONSTRAINTS"
 |	"LEARNER_CONSTRAINTS"
 |	"VOTER_CONSTRAINTS"
+|	"IO_BANDWIDTH"
+|	"IO_READ_BANDWIDTH"
+|	"IO_WRITE_BANDWIDTH"
 
 /************************************************************************************
  *
@@ -11335,6 +11383,7 @@ Statement:
 |	AlterInstanceStmt
 |	AlterSequenceStmt
 |	AlterPolicyStmt
+|	AlterResourceGroupStmt
 |	AnalyzeTableStmt
 |	BeginTransactionStmt
 |	BinlogStmt
@@ -11354,6 +11403,7 @@ Statement:
 |	CreateRoleStmt
 |	CreateBindingStmt
 |	CreatePolicyStmt
+|	CreateResourceGroupStmt
 |	CreateSequenceStmt
 |	CreateStatisticsStmt
 |	DoStmt
@@ -13935,6 +13985,27 @@ DropPolicyStmt:
 		$$ = &ast.DropPlacementPolicyStmt{
 			IfExists:   $4.(bool),
 			PolicyName: model.NewCIStr($5),
+		}
+	}
+
+CreateResourceGroupStmt:
+	"CREATE" OrReplace "RESOURCE" "GROUP" IfNotExists RGroupName ResourceGroupOptionList
+	{
+		$$ = &ast.CreateResourceGroupStmt{
+			OrReplace:               $2.(bool),
+			IfNotExists:             $5.(bool),
+			RGroupName:              model.NewCIStr($6),
+			ResourceGroupOptionList: $7.([]*ast.ResourceGroupOption),
+		}
+	}
+
+AlterResourceGroupStmt:
+	"ALTER" "RESOURCE" "GROUP" IfExists RGroupName ResourceGroupOptionList
+	{
+		$$ = &ast.AlterResourceGroupStmt{
+			IfExists:                $4.(bool),
+			RGroupName:              model.NewCIStr($5),
+			ResourceGroupOptionList: $6.([]*ast.ResourceGroupOption),
 		}
 	}
 
