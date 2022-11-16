@@ -29,6 +29,7 @@ var (
 	_ DDLNode = &AlterSequenceStmt{}
 	_ DDLNode = &AlterPlacementPolicyStmt{}
 	_ DDLNode = &AlterResourceGroupStmt{}
+	_ DDLNode = &AlterUserResourceGroupStmt{}
 	_ DDLNode = &CreateDatabaseStmt{}
 	_ DDLNode = &CreateIndexStmt{}
 	_ DDLNode = &CreateTableStmt{}
@@ -4351,6 +4352,34 @@ func (n *AlterResourceGroupStmt) Accept(v Visitor) (Node, bool) {
 		return v.Leave(newNode)
 	}
 	n = newNode.(*AlterResourceGroupStmt)
+	return v.Leave(n)
+}
+
+type AlterUserResourceGroupStmt struct {
+	ddlNode
+	IfExists   bool
+	UserSpec   *UserSpec
+	RGroupName model.CIStr
+}
+
+func (n *AlterUserResourceGroupStmt) Restore(ctx *format.RestoreCtx) error {
+	ctx.WriteKeyWord("ALTER USER ")
+	if n.IfExists {
+		ctx.WriteKeyWord("IF EXISTS ")
+	}
+	n.UserSpec.Restore(ctx)
+	ctx.WriteKeyWord(" RESOURCE GROUP ")
+	ctx.WriteName(n.RGroupName.O)
+
+	return nil
+}
+
+func (n *AlterUserResourceGroupStmt) Accept(v Visitor) (Node, bool) {
+	newNode, skipChildren := v.Enter(n)
+	if skipChildren {
+		return v.Leave(newNode)
+	}
+	n = newNode.(*AlterUserResourceGroupStmt)
 	return v.Leave(n)
 }
 
