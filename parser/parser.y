@@ -1593,15 +1593,15 @@ DirectResourceGroupOption:
 	}
 |	"IO_BANDWIDTH" EqOpt stringLit
 	{
-		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIORate, StrValue: $3}
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOBandwidth, StrValue: $3}
 	}
 |	"IO_READ_BANDWIDTH" EqOpt stringLit
 	{
-		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOReadRate, StrValue: $3}
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOReadBandwidth, StrValue: $3}
 	}
 |	"IO_WRITE_BANDWIDTH" EqOpt stringLit
 	{
-		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOWriteRate, StrValue: $3}
+		$$ = &ast.ResourceGroupOption{Tp: ast.ResourceUnitIOWriteBandwidth, StrValue: $3}
 	}
 
 PlacementOptionList:

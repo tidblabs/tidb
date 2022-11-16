@@ -111,6 +111,7 @@ type InfoSyncer struct {
 	placementManager      PlacementManager
 	scheduleManager       ScheduleManager
 	tiflashReplicaManager TiFlashReplicaManager
+	resourceGroupManager  ResourceGroupManager
 }
 
 // ServerInfo is server static information.
@@ -192,6 +193,7 @@ func GlobalInfoSyncerInit(ctx context.Context, id string, serverIDGetter func() 
 	is.labelRuleManager = initLabelRuleManager(etcdCli)
 	is.placementManager = initPlacementManager(etcdCli)
 	is.scheduleManager = initScheduleManager(etcdCli)
+	is.resourceGroupManager = initResourceGroupManager(etcdCli)
 	is.tiflashReplicaManager = initTiFlashReplicaManager(etcdCli)
 	setGlobalInfoSyncer(is)
 	return is, nil
@@ -235,6 +237,13 @@ func initPlacementManager(etcdCli *clientv3.Client) PlacementManager {
 		return &mockPlacementManager{}
 	}
 	return &PDPlacementManager{etcdCli: etcdCli}
+}
+
+func initResourceGroupManager(etcdCli *clientv3.Client) ResourceGroupManager {
+	if etcdCli == nil {
+		return &mockResourceGroupManager{groups: make(map[string]*ResourceGroup)}
+	}
+	return &ExtenalResourceGroupManager{etcdCli: etcdCli}
 }
 
 func initTiFlashReplicaManager(etcdCli *clientv3.Client) TiFlashReplicaManager {
@@ -566,6 +575,26 @@ func PutRuleBundlesWithRetry(ctx context.Context, bundles []*placement.Bundle, m
 	}
 
 	return
+}
+
+// GetResourceGroup is used to get one specific resource group from PD.
+func GetResourceGroup(ctx context.Context, name string) (*ResourceGroup, error) {
+	is, err := getGlobalInfoSyncer()
+	if err != nil {
+		return nil, err
+	}
+
+	return is.resourceGroupManager.GetResourceGroup(ctx, name)
+}
+
+// PutResourceGroup is used to post specific resource group to PD.
+func PutResourceGroup(ctx context.Context, group *ResourceGroup) error {
+	is, err := getGlobalInfoSyncer()
+	if err != nil {
+		return err
+	}
+
+	return is.resourceGroupManager.PutResourceGroup(ctx, group)
 }
 
 // PutRuleBundlesWithDefaultRetry will retry for default times
