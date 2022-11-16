@@ -1082,6 +1082,8 @@ const (
 	ErrPartitionColumnStatsMissing        = 8244
 	ErrColumnInChange                     = 8245
 	ErrDDLSetting                         = 8246
+	ErrResourceGroupExists                = 8247
+	ErrResourceGroupNotExists             = 8248
 
 	// TiKV/PD/TiFlash errors.
 	ErrPDServerTimeout           = 9001

@@ -211,6 +211,12 @@ func (b *Builder) ApplyDiff(m *meta.Meta, diff *model.SchemaDiff) ([]int64, erro
 		return b.applyDropPolicy(diff.SchemaID), nil
 	case model.ActionAlterPlacementPolicy:
 		return b.applyAlterPolicy(m, diff)
+	case model.ActionCreateResourceGroup:
+		return nil, b.applyCreateOrAlterResourceGroup(m, diff)
+	case model.ActionAlterResourceGroup:
+		return nil, b.applyCreateOrAlterResourceGroup(m, diff)
+	case model.ActionDropResourceGroup:
+		return nil, b.applyDropResourceGroup(m, diff)
 	case model.ActionTruncateTablePartition, model.ActionTruncateTable:
 		return b.applyTruncateTableOrPartition(m, diff)
 	case model.ActionDropTable, model.ActionDropTablePartition:
@@ -501,13 +507,30 @@ func (b *Builder) copySortedTables(oldTableID, newTableID int64) {
 	}
 }
 
+func (b *Builder) applyCreateOrAlterResourceGroup(m *meta.Meta, diff *model.SchemaDiff) error {
+	group, err := m.GetResourceGroup(diff.SchemaID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if group == nil {
+		return ErrResourceGroupNotExists.GenWithStackByArgs(fmt.Sprintf("(Group ID %d)", diff.SchemaID))
+	}
+	// TODO: need mark updated?
+	b.is.setResourceGroup(group)
+	return nil
+}
+
+func (b *Builder) applyDropResourceGroup(m *meta.Meta, diff *model.SchemaDiff) error {
+	panic("not implemented") // TODO: Implement
+}
+
 func (b *Builder) applyCreatePolicy(m *meta.Meta, diff *model.SchemaDiff) error {
 	po, err := m.GetPolicy(diff.SchemaID)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	if po == nil {
-		return ErrPlacementPolicyExists.GenWithStackByArgs(
+		return ErrPlacementPolicyNotExists.GenWithStackByArgs(
 			fmt.Sprintf("(Policy ID %d)", diff.SchemaID),
 		)
 	}
@@ -529,7 +552,7 @@ func (b *Builder) applyAlterPolicy(m *meta.Meta, diff *model.SchemaDiff) ([]int6
 	}
 
 	if po == nil {
-		return nil, ErrPlacementPolicyExists.GenWithStackByArgs(
+		return nil, ErrPlacementPolicyNotExists.GenWithStackByArgs(
 			fmt.Sprintf("(Policy ID %d)", diff.SchemaID),
 		)
 	}
@@ -1003,6 +1026,7 @@ func NewBuilder(store kv.Storage, factory func() (pools.Resource, error)) *Build
 		is: &infoSchema{
 			schemaMap:             map[string]*schemaTables{},
 			policyMap:             map[string]*model.PolicyInfo{},
+			resourceGroupMap:      map[string]*model.ResourceGroupInfo{},
 			ruleBundleMap:         map[int64]*placement.Bundle{},
 			sortedTablesBuckets:   make([]sortedTables, bucketCount),
 			referredForeignKeyMap: make(map[SchemaAndTableName][]*model.ReferredFKInfo),

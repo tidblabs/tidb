@@ -98,6 +98,9 @@ const (
 	ActionMultiSchemaChange             ActionType = 61
 	ActionFlashbackCluster              ActionType = 62
 	ActionRecoverSchema                 ActionType = 63
+	ActionCreateResourceGroup           ActionType = 64
+	ActionAlterResourceGroup            ActionType = 65
+	ActionDropResourceGroup             ActionType = 66
 )
 
 var actionMap = map[ActionType]string{
@@ -160,6 +163,9 @@ var actionMap = map[ActionType]string{
 	ActionMultiSchemaChange:             "alter table multi-schema change",
 	ActionFlashbackCluster:              "flashback cluster",
 	ActionRecoverSchema:                 "flashback schema",
+	ActionCreateResourceGroup:           "create resource group",
+	ActionAlterResourceGroup:            "alter resource group",
+	ActionDropResourceGroup:             "drop resource group",
 
 	// `ActionAlterTableAlterPartition` is removed and will never be used.
 	// Just left a tombstone here for compatibility.

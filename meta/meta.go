@@ -59,25 +59,27 @@ var (
 //
 
 var (
-	mMetaPrefix       = []byte("m")
-	mNextGlobalIDKey  = []byte("NextGlobalID")
-	mSchemaVersionKey = []byte("SchemaVersionKey")
-	mDBs              = []byte("DBs")
-	mDBPrefix         = "DB"
-	mTablePrefix      = "Table"
-	mSequencePrefix   = "SID"
-	mSeqCyclePrefix   = "SequenceCycle"
-	mTableIDPrefix    = "TID"
-	mIncIDPrefix      = "IID"
-	mRandomIDPrefix   = "TARID"
-	mBootstrapKey     = []byte("BootstrapKey")
-	mSchemaDiffPrefix = "Diff"
-	mPolicies         = []byte("Policies")
-	mPolicyPrefix     = "Policy"
-	mPolicyGlobalID   = []byte("PolicyGlobalID")
-	mPolicyMagicByte  = CurrentMagicByteVer
-	mDDLTableVersion  = []byte("DDLTableVersion")
-	mConcurrentDDL    = []byte("concurrentDDL")
+	mMetaPrefix          = []byte("m")
+	mNextGlobalIDKey     = []byte("NextGlobalID")
+	mSchemaVersionKey    = []byte("SchemaVersionKey")
+	mDBs                 = []byte("DBs")
+	mDBPrefix            = "DB"
+	mTablePrefix         = "Table"
+	mSequencePrefix      = "SID"
+	mSeqCyclePrefix      = "SequenceCycle"
+	mTableIDPrefix       = "TID"
+	mIncIDPrefix         = "IID"
+	mRandomIDPrefix      = "TARID"
+	mBootstrapKey        = []byte("BootstrapKey")
+	mSchemaDiffPrefix    = "Diff"
+	mPolicies            = []byte("Policies")
+	mPolicyPrefix        = "Policy"
+	mResourceGroups      = []byte("ResourceGroups")
+	mResourcegroupPrefix = "RGroup"
+	mPolicyGlobalID      = []byte("PolicyGlobalID")
+	mPolicyMagicByte     = CurrentMagicByteVer
+	mDDLTableVersion     = []byte("DDLTableVersion")
+	mConcurrentDDL       = []byte("concurrentDDL")
 )
 
 const (
@@ -109,6 +111,10 @@ var (
 	ErrPolicyExists = dbterror.ClassMeta.NewStd(errno.ErrPlacementPolicyExists)
 	// ErrPolicyNotExists is the error for policy not exists.
 	ErrPolicyNotExists = dbterror.ClassMeta.NewStd(errno.ErrPlacementPolicyNotExists)
+	// ErrResourceGroupExists is the error for resource group exists.
+	ErrResourceGroupExists = dbterror.ClassMeta.NewStd(errno.ErrResourceGroupExists)
+	// ErrResourceGroupNotExists is the error for resource group not exists.
+	ErrResourceGroupNotExists = dbterror.ClassMeta.NewStd(errno.ErrResourceGroupNotExists)
 	// ErrTableExists is the error for table exists.
 	ErrTableExists = dbterror.ClassMeta.NewStd(mysql.ErrTableExists)
 	// ErrTableNotExists is the error for table not exists.
@@ -222,6 +228,10 @@ func (m *Meta) GetPolicyID() (int64, error) {
 
 func (*Meta) policyKey(policyID int64) []byte {
 	return []byte(fmt.Sprintf("%s:%d", mPolicyPrefix, policyID))
+}
+
+func (*Meta) resourceGroupKey(groupID int64) []byte {
+	return []byte(fmt.Sprintf("%s:%d", mResourcegroupPrefix, groupID))
 }
 
 func (*Meta) dbKey(dbID int64) []byte {
@@ -436,6 +446,22 @@ func (m *Meta) checkPolicyNotExists(policyKey []byte) error {
 	return errors.Trace(err)
 }
 
+func (m *Meta) checkResourceGroupNotExists(groupKey []byte) error {
+	v, err := m.txn.HGet(mResourceGroups, groupKey)
+	if err == nil && v != nil {
+		err = ErrPolicyExists.GenWithStack("policy already exists")
+	}
+	return errors.Trace(err)
+}
+
+func (m *Meta) checkResourceGroupExists(groupKey []byte) error {
+	v, err := m.txn.HGet(mResourceGroups, groupKey)
+	if err == nil && v == nil {
+		err = ErrPolicyNotExists.GenWithStack("policy doesn't exist")
+	}
+	return errors.Trace(err)
+}
+
 func (m *Meta) checkDBExists(dbKey []byte) error {
 	v, err := m.txn.HGet(mDBs, dbKey)
 	if err == nil && v == nil {
@@ -499,6 +525,24 @@ func (m *Meta) UpdatePolicy(policy *model.PolicyInfo) error {
 		return errors.Trace(err)
 	}
 	return m.txn.HSet(mPolicies, policyKey, attachMagicByte(data))
+}
+
+// CreateResourceGroup creates a policy.
+func (m *Meta) CreateOrUpdateResourceGroup(group *model.ResourceGroupInfo) error {
+	if group.ID == 0 {
+		return errors.New("group.ID is invalid")
+	}
+
+	groupKey := m.resourceGroupKey(group.ID)
+	// if err := m.checkResourceGroupNotExists(groupKey); err != nil {
+	// 	return errors.Trace(err)
+	// }
+
+	data, err := json.Marshal(group)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return m.txn.HSet(mResourceGroups, groupKey, attachMagicByte(data))
 }
 
 // CreateDatabase creates a database with db info.
@@ -882,6 +926,27 @@ func (m *Meta) GetPolicy(policyID int64) (*model.PolicyInfo, error) {
 	policy := &model.PolicyInfo{}
 	err = json.Unmarshal(value, policy)
 	return policy, errors.Trace(err)
+}
+
+// GetResourceGroup	gets the resource group value with ID.
+func (m *Meta) GetResourceGroup(groupID int64) (*model.ResourceGroupInfo, error) {
+	groupKey := m.resourceGroupKey(groupID)
+	value, err := m.txn.HGet(mResourceGroups, groupKey)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if value == nil {
+		return nil, ErrResourceGroupNotExists.GenWithStack("resource group id : %d doesn't exist", groupID)
+	}
+
+	value, err = detachMagicByte(value)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	group := &model.ResourceGroupInfo{}
+	err = json.Unmarshal(value, group)
+	return group, errors.Trace(err)
 }
 
 func attachMagicByte(data []byte) []byte {

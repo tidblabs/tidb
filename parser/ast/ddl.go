@@ -2077,9 +2077,9 @@ type ResourceUnitType int
 const (
 	ResourceUnitCPU ResourceUnitType = iota
 	// Only valied when read/wirte not setting.
-	ResourceUnitIORate
-	ResourceUnitIOReadRate
-	ResourceUnitIOWriteRate
+	ResourceUnitIOBandwidth
+	ResourceUnitIOReadBandwidth
+	ResourceUnitIOWriteBandwidth
 )
 
 func (n *ResourceGroupOption) Restore(ctx *format.RestoreCtx) error {
@@ -2092,15 +2092,15 @@ func (n *ResourceGroupOption) Restore(ctx *format.RestoreCtx) error {
 			ctx.WriteKeyWord("CPU ")
 			ctx.WritePlain("= ")
 			ctx.WriteString(n.StrValue)
-		case ResourceUnitIORate:
+		case ResourceUnitIOBandwidth:
 			ctx.WriteKeyWord("IO_BANDWIDTH ")
 			ctx.WritePlain("= ")
 			ctx.WriteString(n.StrValue)
-		case ResourceUnitIOReadRate:
+		case ResourceUnitIOReadBandwidth:
 			ctx.WriteKeyWord("IO_READ_BANDWIDTH ")
 			ctx.WritePlain("= ")
 			ctx.WriteString(n.StrValue)
-		case ResourceUnitIOWriteRate:
+		case ResourceUnitIOWriteBandwidth:
 			ctx.WriteKeyWord("IO_WRITE_BANDWIDTH ")
 			ctx.WritePlain("= ")
 			ctx.WriteString(n.StrValue)

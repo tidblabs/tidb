@@ -1117,6 +1117,16 @@ func (SchemaTracker) AlterPlacementPolicy(ctx sessionctx.Context, stmt *ast.Alte
 	return nil
 }
 
+// CreateResourceGroup implements the DDL interface, it's no-op in DM's case.
+func (SchemaTracker) CreateResourceGroup(_ sessionctx.Context, _ *ast.CreateResourceGroupStmt) error {
+	return nil
+}
+
+// AlterResourceGroup implements the DDL interface, it's no-op in DM's case.
+func (SchemaTracker) AlterResourceGroup(ctx sessionctx.Context, stmt *ast.AlterResourceGroupStmt) error {
+	return nil
+}
+
 // BatchCreateTableWithInfo implements the DDL interface, it will call CreateTableWithInfo for each table.
 func (d SchemaTracker) BatchCreateTableWithInfo(ctx sessionctx.Context, schema model.CIStr, info []*model.TableInfo, cs ...ddl.CreateTableWithInfoConfigurier) error {
 	for _, tableInfo := range info {
