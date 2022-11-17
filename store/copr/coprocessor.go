@@ -17,6 +17,7 @@ package copr
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strconv"
@@ -897,6 +898,7 @@ func (worker *copIteratorWorker) handleTaskOnce(bo *Backoffer, task *copTask, ch
 	if worker.req.ResourceGroupTagger != nil {
 		worker.req.ResourceGroupTagger(req)
 	}
+	req.ResourceGroupTag = binary.BigEndian.AppendUint64(make([]byte, 0, 8), worker.req.GroupID)
 	req.StoreTp = getEndPointType(task.storeType)
 	startTime := time.Now()
 	if worker.kvclient.Stats == nil {

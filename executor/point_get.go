@@ -16,6 +16,7 @@ package executor
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/pingcap/errors"
@@ -55,11 +56,16 @@ func (b *executorBuilder) buildPointGet(p *plannercore.PointGetPlan) Executor {
 		}()
 	}
 
+	groupID := uint64(0)
+	if group, ok := b.is.ResourceGroupByName(model.NewCIStr(b.ctx.GetSessionVars().ResourceGroupName)); ok {
+		groupID = uint64(group.ID)
+	}
 	e := &PointGetExecutor{
 		baseExecutor:     newBaseExecutor(b.ctx, p.Schema(), p.ID()),
 		txnScope:         b.txnScope,
 		readReplicaScope: b.readReplicaScope,
 		isStaleness:      b.isStaleness,
+		RGroupID:         groupID,
 	}
 
 	e.base().initCap = 1
@@ -142,7 +148,8 @@ type PointGetExecutor struct {
 	// virtualColumnRetFieldTypes records the RetFieldTypes of virtual columns.
 	virtualColumnRetFieldTypes []*types.FieldType
 
-	stats *runtimeStatsWithSnapshot
+	stats    *runtimeStatsWithSnapshot
+	RGroupID uint64
 }
 
 // Init set fields needed for PointGetExecutor reuse, this does NOT change baseExecutor field
@@ -189,6 +196,7 @@ func (e *PointGetExecutor) Open(context.Context) error {
 		return err
 	}
 	setOptionForTopSQL(e.ctx.GetSessionVars().StmtCtx, e.snapshot)
+	e.snapshot.SetOption(kv.ResourceGroupTag, binary.BigEndian.AppendUint64(make([]byte, 0, 8), e.RGroupID))
 	return nil
 }
 
