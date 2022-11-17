@@ -4829,6 +4829,7 @@ func (b *executorBuilder) buildBatchPointGet(plan *plannercore.BatchPointGetPlan
 		singlePart:   plan.SinglePart,
 		partTblID:    plan.PartTblID,
 		columns:      plan.Columns,
+		RGroupName:   model.NewCIStr(b.ctx.GetSessionVars().ResourceGroupName).L,
 	}
 
 	e.snapshot, err = b.getSnapshot()

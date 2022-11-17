@@ -60,6 +60,7 @@ func (b *executorBuilder) buildPointGet(p *plannercore.PointGetPlan) Executor {
 		txnScope:         b.txnScope,
 		readReplicaScope: b.readReplicaScope,
 		isStaleness:      b.isStaleness,
+		RGroupName:       model.NewCIStr(b.ctx.GetSessionVars().ResourceGroupName).L,
 	}
 
 	e.base().initCap = 1
@@ -142,7 +143,8 @@ type PointGetExecutor struct {
 	// virtualColumnRetFieldTypes records the RetFieldTypes of virtual columns.
 	virtualColumnRetFieldTypes []*types.FieldType
 
-	stats *runtimeStatsWithSnapshot
+	stats      *runtimeStatsWithSnapshot
+	RGroupName string
 }
 
 // Init set fields needed for PointGetExecutor reuse, this does NOT change baseExecutor field
@@ -189,6 +191,7 @@ func (e *PointGetExecutor) Open(context.Context) error {
 		return err
 	}
 	setOptionForTopSQL(e.ctx.GetSessionVars().StmtCtx, e.snapshot)
+	e.snapshot.SetOption(kv.ResourceGroupTag, []byte(e.RGroupName))
 	return nil
 }
 

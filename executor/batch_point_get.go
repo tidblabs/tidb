@@ -75,6 +75,8 @@ type BatchPointGetExec struct {
 
 	snapshot kv.Snapshot
 	stats    *runtimeStatsWithSnapshot
+	// TODO: find a better place to fetch this id
+	RGroupName string
 }
 
 // buildVirtualColumnInfo saves virtual column indices and sort them in definition order
@@ -99,6 +101,7 @@ func (e *BatchPointGetExec) Open(context.Context) error {
 	e.txn = txn
 
 	setOptionForTopSQL(e.ctx.GetSessionVars().StmtCtx, e.snapshot)
+	e.snapshot.SetOption(kv.ResourceGroupTag, []byte(e.RGroupName))
 	var batchGetter kv.BatchGetter = e.snapshot
 	if txn.Valid() {
 		lock := e.tblInfo.Lock
