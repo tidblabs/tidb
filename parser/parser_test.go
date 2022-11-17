@@ -3625,9 +3625,6 @@ func TestDDL(t *testing.T) {
 		{"alter resource group x cpu='12c'", true, "ALTER RESOURCE GROUP `x` CPU = '12c'"},
 		{"alter resource group x region='us, 3'", false, ""},
 
-		{"alter user 'root'@'localhost' resource group test", true, "ALTER USER `root`@`localhost` RESOURCE GROUP `test`"},
-		{"alter user if exists 'test'@'127.0.0.1' resource group x", true, "ALTER USER IF EXISTS `test`@`127.0.0.1` RESOURCE GROUP `x`"},
-
 		// for table stats options
 		// 1. create table with options
 		{"CREATE TABLE t (a int) STATS_BUCKETS=1", true, "CREATE TABLE `t` (`a` INT) STATS_BUCKETS = 1"},
