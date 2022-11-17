@@ -54,7 +54,8 @@ func onCreateOrAlterResourceGroup(d *ddlCtx, t *meta.Meta, job *model.Job) (ver 
 		job.SchemaID = groupInfo.ID
 		err = infosync.PutResourceGroup(context.TODO(), infosync.ConvertAPIResourceGroup(groupInfo))
 		if err != nil {
-			logutil.BgLogger().Warn("put resource group to etcd failed", zap.Error(err))
+			logutil.BgLogger().Error("put resource group to etcd failed", zap.Error(err))
+			job.State = model.JobStateCancelled
 			return ver, errors.Trace(err)
 		}
 		ver, err = updateSchemaVersion(d, t, job)

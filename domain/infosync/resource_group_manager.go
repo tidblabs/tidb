@@ -28,15 +28,17 @@ import (
 
 // ResourceGroup is used to conmunicate with ResourGroup Manager.
 type ResourceGroup struct {
+	ID               int64  `json:"id"`
 	Name             string `json:"name"`
 	CPU              string `json:"cpu"`
-	IOBandwidth      string `json:"io_bandwidth"`
-	IOReadBandwidth  string `json:"io_read_bandwidth"`
-	IOWriteBandwidth string `json:"io_write_bandwidth"`
+	IOBandwidth      string `json:"io_bandwidth,omitempty"`
+	IOReadBandwidth  string `json:"io_read_bandwidth,omitempty"`
+	IOWriteBandwidth string `json:"io_write_bandwidth,omitempty"`
 }
 
 func ConvertAPIResourceGroup(modelGroup *model.ResourceGroupInfo) *ResourceGroup {
 	return &ResourceGroup{
+		ID:               modelGroup.ID,
 		Name:             modelGroup.Name.L,
 		CPU:              modelGroup.CPULimiter,
 		IOBandwidth:      modelGroup.IOBandwidth,

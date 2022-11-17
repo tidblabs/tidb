@@ -431,6 +431,7 @@ func doRequest(ctx context.Context, apiName string, addrs []string, route, metho
 					zap.String("url", url),
 					zap.Int("http status", res.StatusCode),
 					zap.Int("address order", idx),
+					zap.ByteString("response body", bodyBytes),
 				)
 				err = ErrHTTPServiceError.FastGen("%s", bodyBytes)
 				if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusPreconditionFailed {
