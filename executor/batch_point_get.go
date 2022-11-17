@@ -16,7 +16,6 @@ package executor
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -77,7 +76,7 @@ type BatchPointGetExec struct {
 	snapshot kv.Snapshot
 	stats    *runtimeStatsWithSnapshot
 	// TODO: find a better place to fetch this id
-	RGroupID uint64
+	RGroupName string
 }
 
 // buildVirtualColumnInfo saves virtual column indices and sort them in definition order
@@ -102,7 +101,7 @@ func (e *BatchPointGetExec) Open(context.Context) error {
 	e.txn = txn
 
 	setOptionForTopSQL(e.ctx.GetSessionVars().StmtCtx, e.snapshot)
-	e.snapshot.SetOption(kv.ResourceGroupTag, binary.BigEndian.AppendUint64(make([]byte, 0, 8), e.RGroupID))
+	e.snapshot.SetOption(kv.ResourceGroupTag, []byte(e.RGroupName))
 	var batchGetter kv.BatchGetter = e.snapshot
 	if txn.Valid() {
 		lock := e.tblInfo.Lock

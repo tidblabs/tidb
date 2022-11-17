@@ -397,7 +397,7 @@ type Request struct {
 	// FixedRowCountHint is the optimization hint for copr request for task scheduling.
 	FixedRowCountHint []int
 	// GroupID is the resource group id.
-	GroupID uint64
+	GroupName string
 }
 
 // CoprRequestAdjuster is used to check and adjust a copr request according to specific rules.

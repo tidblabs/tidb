@@ -4814,11 +4814,6 @@ func (b *executorBuilder) buildBatchPointGet(plan *plannercore.BatchPointGetPlan
 		}()
 	}
 
-	groupID := uint64(0)
-	if group, ok := b.is.ResourceGroupByName(model.NewCIStr(b.ctx.GetSessionVars().ResourceGroupName)); ok {
-		groupID = uint64(group.ID)
-	}
-
 	decoder := NewRowDecoder(b.ctx, plan.Schema(), plan.TblInfo)
 	e := &BatchPointGetExec{
 		baseExecutor: newBaseExecutor(b.ctx, plan.Schema(), plan.ID()),
@@ -4834,7 +4829,7 @@ func (b *executorBuilder) buildBatchPointGet(plan *plannercore.BatchPointGetPlan
 		singlePart:   plan.SinglePart,
 		partTblID:    plan.PartTblID,
 		columns:      plan.Columns,
-		RGroupID:     groupID,
+		RGroupName:   model.NewCIStr(b.ctx.GetSessionVars().ResourceGroupName).L,
 	}
 
 	e.snapshot, err = b.getSnapshot()
