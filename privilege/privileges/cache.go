@@ -102,6 +102,7 @@ type UserRecord struct {
 	AuthPlugin           string
 	AuthTokenIssuer      string
 	Email                string
+	ResourceGroup        string
 }
 
 // NewUserRecord return a UserRecord, only use for unit test.
@@ -682,6 +683,18 @@ func (p *MySQLPrivilege) decodeUserTableRow(row chunk.Row, fs []*ast.ResultField
 					return err
 				}
 				value.Email = email
+			}
+
+			pathExpr, err = types.ParseJSONPathExpr("$.metadata.resource_group")
+			if err != nil {
+				return err
+			}
+			if resourceGroup, found := bj.Extract([]types.JSONPathExpression{pathExpr}); found {
+				resourceGroup, err := resourceGroup.Unquote()
+				if err != nil {
+					return err
+				}
+				value.ResourceGroup = resourceGroup
 			}
 		default:
 			value.assignUserOrHost(row, i, f)

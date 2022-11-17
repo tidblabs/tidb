@@ -845,6 +845,7 @@ func (cc *clientConn) openSessionAndDoAuth(authData []byte, authPlugin string) e
 	} else if err = cc.ctx.Auth(userIdentity, authData, cc.salt); err != nil {
 		return err
 	}
+
 	cc.ctx.SetPort(port)
 	if cc.dbname != "" {
 		err = cc.useDB(context.Background(), cc.dbname)

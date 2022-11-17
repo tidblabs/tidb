@@ -830,7 +830,7 @@ func (e *SimpleExec) executeCreateUser(ctx context.Context, s *ast.CreateUserStm
 	var userAttributes = ""
 	if s.CommentOrAttributeOption != nil {
 		if s.CommentOrAttributeOption.Type != ast.UserResourceGroupName {
-			userAttributes = `{"metadata": {"resource group": "default"`
+			userAttributes = `{"metadata": {"resource_group": "default"`
 			if s.CommentOrAttributeOption.Type == ast.UserCommentType {
 				userAttributes += fmt.Sprintf(`, "comment": "%s"`, s.CommentOrAttributeOption.Value)
 			} else if s.CommentOrAttributeOption.Type == ast.UserAttributeType {
@@ -838,10 +838,10 @@ func (e *SimpleExec) executeCreateUser(ctx context.Context, s *ast.CreateUserStm
 			}
 			userAttributes += `}}`
 		} else {
-			userAttributes = fmt.Sprintf(`{"metadata": {"resource group": "%s"}}`, s.CommentOrAttributeOption.Value)
+			userAttributes = fmt.Sprintf(`{"metadata": {"resource_group": "%s"}}`, s.CommentOrAttributeOption.Value)
 		}
 	} else {
-		userAttributes = `{"metadata": {"resource group": "default"}}`
+		userAttributes = `{"metadata": {"resource_group": "default"}}`
 	}
 
 	tokenIssuer := ""
@@ -1116,7 +1116,7 @@ func (e *SimpleExec) executeAlterUser(ctx context.Context, s *ast.AlterUserStmt)
 			} else if s.CommentOrAttributeOption.Type == ast.UserAttributeType {
 				newAttributesStr = fmt.Sprintf(`{"metadata": %s}`, s.CommentOrAttributeOption.Value)
 			} else {
-				newAttributesStr = fmt.Sprintf(`{"metadata": {"resource group": "%s"}}`, s.CommentOrAttributeOption.Value)
+				newAttributesStr = fmt.Sprintf(`{"metadata": {"resource_group": "%s"}}`, s.CommentOrAttributeOption.Value)
 			}
 			fields = append(fields, alterField{"user_attributes=json_merge_patch(user_attributes, %?)", newAttributesStr})
 		}
