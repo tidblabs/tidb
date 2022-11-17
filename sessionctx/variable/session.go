@@ -1305,6 +1305,9 @@ type SessionVars struct {
 	// preuseChunkAlloc indicates whether pre statement use chunk alloc
 	// like select @@last_sql_use_alloc
 	preUseChunkAlloc bool
+
+	// Resource group name
+	ResourceGroupName string
 }
 
 // GetNewChunk Attempt to request memory from the chunk pool
