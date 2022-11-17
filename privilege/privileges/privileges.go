@@ -437,6 +437,11 @@ func (p *UserPrivileges) ConnectionVerification(user *auth.UserIdentity, authUse
 
 	p.user = authUser
 	p.host = record.Host
+
+	// special handling to existing users or root user initialized with insecure
+	if record.ResourceGroup == "" {
+		record.ResourceGroup = "default"
+	}
 	return record.ResourceGroup, nil
 }
 
