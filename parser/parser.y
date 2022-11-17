@@ -12925,6 +12925,11 @@ CommentOrAttributeOption:
 		$$ = &ast.CommentOrAttributeOption{Type: ast.UserAttributeType, Value: $2}
 	}
 
+|  "RESOURCE" "GROUP" stringLit
+{
+	$$ = &ast.CommentOrAttributeOption{Type: ast.UserResourceGroupName, Value: $3}
+}
+
 PasswordOrLockOptions:
 	{
 		$$ = []*ast.PasswordOrLockOption{}
