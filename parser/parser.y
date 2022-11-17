@@ -869,7 +869,6 @@ import (
 	AlterPolicyStmt            "Alter Placement Policy statement"
 	AlterResourceGroupStmt     "Alter Resource Group statement"
 	AlterSequenceStmt          "Alter sequence statement"
-	AlterUserResourceGroupStmt "Alter User binding Resource Group statement"
 	AnalyzeTableStmt           "Analyze table statement"
 	BeginTransactionStmt       "BEGIN TRANSACTION statement"
 	BinlogStmt                 "Binlog base64 statement"
@@ -11385,7 +11384,6 @@ Statement:
 |	AlterSequenceStmt
 |	AlterPolicyStmt
 |	AlterResourceGroupStmt
-|	AlterUserResourceGroupStmt
 |	AnalyzeTableStmt
 |	BeginTransactionStmt
 |	BinlogStmt
@@ -14008,16 +14006,6 @@ AlterResourceGroupStmt:
 			IfExists:                $4.(bool),
 			RGroupName:              model.NewCIStr($5),
 			ResourceGroupOptionList: $6.([]*ast.ResourceGroupOption),
-		}
-	}
-
-AlterUserResourceGroupStmt:
-	"ALTER" "USER" IfExists UserSpec "RESOURCE" "GROUP" RGroupName
-	{
-		$$ = &ast.AlterUserResourceGroupStmt{
-			IfExists: $3.(bool),
-			UserSpec: $4.(*ast.UserSpec),
-			RGroupName: model.NewCIStr($7),
 		}
 	}
 
