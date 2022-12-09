@@ -251,6 +251,14 @@ require (
 replace (
 	// fix potential security issue(CVE-2020-26160) introduced by indirect dependency.
 	github.com/dgrijalva/jwt-go => github.com/form3tech-oss/jwt-go v3.2.6-0.20210809144907-32ab6a8243d7+incompatible
+	// Use github.com/tidbcloud/kvproto/release-6.2-dev-tier
+	github.com/pingcap/kvproto => github.com/tidbcloud/kvproto v0.0.0-20221207104026-412a7a511f18
 	github.com/pingcap/tidb/parser => ./parser
+	// Use github.com/tikv/client-go/v2@api-v2
+	github.com/tikv/client-go/v2 => github.com/AmoebaProtozoa/client-go/v2 v2.0.1-0.20221207041552-12fe7d40318b
+
+	// Use github.com/tidbcloud/pd-cse/client
+	github.com/tikv/pd/client => github.com/tidbcloud/pd-cse/client v0.0.0-20220905061235-4cfe0db56daa
 	go.opencensus.io => go.opencensus.io v0.23.1-0.20220331163232-052120675fac
+
 )

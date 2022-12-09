@@ -43,6 +43,7 @@ import (
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/infoschema"
 	"github.com/pingcap/tidb/infoschema/perfschema"
+	"github.com/pingcap/tidb/keyspace"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/metrics"
@@ -62,6 +63,7 @@ import (
 	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/domainutil"
 	"github.com/pingcap/tidb/util/engine"
+	"github.com/pingcap/tidb/util/etcd"
 	"github.com/pingcap/tidb/util/expensivequery"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/memory"
@@ -941,6 +943,14 @@ func (do *Domain) Init(
 			if err != nil {
 				return errors.Trace(err)
 			}
+			// If keyspace has been set in KvStorage
+			if keyspace.IsKvStorageKeyspaceSet(do.store) {
+				keyspacePrefix := do.store.GetCodec().GetKeyspace()
+				keyspaceID := keyspace.GetID(keyspacePrefix)
+				etcdPathPrefix := keyspace.GetKeyspacePathPrefix(keyspaceID)
+				etcd.SetEtcdCliByNamespace(cli, etcdPathPrefix)
+			}
+
 			do.etcdClient = cli
 		}
 	}
