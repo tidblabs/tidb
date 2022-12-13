@@ -271,7 +271,7 @@ func (builder *RequestBuilder) SetFromSessionVars(sv *variable.SessionVars) *Req
 	}
 	builder.RequestSource.RequestSourceInternal = sv.InRestrictedSQL
 	builder.RequestSource.RequestSourceType = sv.RequestSourceType
-	builder.Request.GroupName = model.NewCIStr(sv.ResourceGroupName).L
+	builder.Request.ResourceGroupName = model.NewCIStr(sv.ResourceGroupName).L
 
 	return builder
 }
