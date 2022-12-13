@@ -33,5 +33,5 @@ out
 bazel-bin
 bazel-out
 bazel-testlogs
-bazel-tidb
+bazel-tidb-cse
 .ijwb/
