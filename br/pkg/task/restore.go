@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/tidb/util/mathutil"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/tikv/client-go/v2/tikv"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
@@ -52,6 +53,12 @@ const (
 	// FlagWithPlacementPolicy corresponds to tidb config with-tidb-placement-mode
 	// current only support STRICT or IGNORE, the default is STRICT according to tidb.
 	FlagWithPlacementPolicy = "with-tidb-placement-mode"
+	// FlagKeyspaceName corresponds to tidb config keyspace-name
+	FlagKeyspaceName = "keyspace-name"
+	// FlagLeaderDownload corresponds to tidb config leader-download
+	FlagLeaderDownload = "leader-download"
+	// FlagSkipSplit is the flag name of skip split region
+	FlagSkipSplit = "skip-split"
 
 	// FlagStreamStartTS and FlagStreamRestoreTS is used for log restore timestamp range.
 	FlagStreamStartTS   = "start-ts"
@@ -165,6 +172,9 @@ type RestoreConfig struct {
 	// if it is empty, directly take restoring log justly.
 	FullBackupStorage string `json:"full-backup-storage" toml:"full-backup-storage"`
 
+	// SkipSplit is used to skip split region when restoring data.
+	SkipSplit bool `json:"skip-split" toml:"skip-split"`
+
 	// [startTs, RestoreTS] is used to `restore log` from StartTS to RestoreTS.
 	StartTS         uint64                      `json:"start-ts" toml:"start-ts"`
 	RestoreTS       uint64                      `json:"restore-ts" toml:"restore-ts"`
@@ -188,6 +198,9 @@ func DefineRestoreFlags(flags *pflag.FlagSet) {
 	// Do not expose this flag
 	_ = flags.MarkHidden(flagNoSchema)
 	flags.String(FlagWithPlacementPolicy, "STRICT", "correspond to tidb global/session variable with-tidb-placement-mode")
+	flags.String(FlagKeyspaceName, "", "correspond to tidb config keyspace-name")
+	flags.Bool(FlagLeaderDownload, false, "correspond to tidb config leader-download")
+	flags.Bool(FlagSkipSplit, false, "skip split region when restoring data")
 
 	DefineRestoreCommonFlags(flags)
 }
@@ -266,6 +279,18 @@ func (cfg *RestoreConfig) ParseFromFlags(flags *pflag.FlagSet) error {
 	cfg.WithPlacementPolicy, err = flags.GetString(FlagWithPlacementPolicy)
 	if err != nil {
 		return errors.Annotatef(err, "failed to get flag %s", FlagWithPlacementPolicy)
+	}
+	cfg.KeyspaceName, err = flags.GetString(FlagKeyspaceName)
+	if err != nil {
+		return errors.Annotatef(err, "failed to get flag %s", FlagKeyspaceName)
+	}
+	cfg.LeaderDownload, err = flags.GetBool(FlagLeaderDownload)
+	if err != nil {
+		return errors.Annotatef(err, "failed to get flag %s", FlagLeaderDownload)
+	}
+	cfg.SkipSplit, err = flags.GetBool(FlagSkipSplit)
+	if err != nil {
+		return errors.Annotatef(err, "failed to get flag %s", FlagSkipSplit)
 	}
 
 	if flags.Lookup(flagFullBackupType) != nil {
@@ -370,6 +395,8 @@ func configureRestoreClient(ctx context.Context, client *restore.Client, cfg *Re
 	if cfg.NoSchema {
 		client.EnableSkipCreateSQL()
 	}
+	client.SetKeyspaceName(cfg.KeyspaceName)
+	client.SetLeaderDownload(cfg.LeaderDownload)
 	client.SetSwitchModeInterval(cfg.SwitchModeInterval)
 	client.SetBatchDdlSize(cfg.DdlBatchSize)
 	client.SetPlacementPolicyMode(cfg.WithPlacementPolicy)
@@ -471,6 +498,10 @@ func IsStreamRestore(cmdName string) bool {
 
 // RunRestore starts a restore task inside the current goroutine.
 func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConfig) error {
+	config.UpdateGlobal(func(conf *config.Config) {
+		conf.KeyspaceName = cfg.KeyspaceName
+		conf.SplitTable = !cfg.SkipSplit
+	})
 	if IsStreamRestore(cmdName) {
 		return RunStreamRestore(c, g, cmdName, cfg)
 	}
@@ -494,6 +525,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 		return errors.Trace(err)
 	}
 	defer mgr.Close()
+	codec := mgr.GetStorage().GetCodec()
 
 	mergeRegionSize := cfg.MergeSmallRegionSizeBytes
 	mergeRegionCount := cfg.MergeSmallRegionKeyCount
@@ -579,7 +611,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	sp := utils.BRServiceSafePoint{
 		BackupTS: restoreTS,
 		TTL:      utils.DefaultBRGCSafePointTTL,
-		ID:       utils.MakeSafePointID(),
+		ID:       utils.MakeSafePointID(codec.GetKeyspace()),
 	}
 	g.Record("BackupTS", backupMeta.EndVersion)
 	g.Record("RestoreTS", restoreTS)
@@ -655,10 +687,29 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 	errCh := make(chan error, 32)
 
 	tableStream := client.GoCreateTables(ctx, mgr.GetDomain(), tables, newTS, errCh)
+
 	if len(files) == 0 {
 		log.Info("no files, empty databases and tables are restored")
 		summary.SetSuccessStatus(true)
 		// don't return immediately, wait all pipeline done.
+	} else {
+		var oldKeyspace []byte
+		oldKeyspace, _, err = tikv.DecodeKey(files[0].GetStartKey(), backupMeta.ApiVersion)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// Hijack the tableStream and rewrite the rewrite rules.
+		tableStream = util.ChanMap(tableStream, func(t restore.CreatedTable) restore.CreatedTable {
+			t.RewriteRule.OldKeyspace = oldKeyspace
+			t.RewriteRule.NewKeyspace = codec.GetKeyspace()
+
+			for _, rule := range t.RewriteRule.Data {
+				rule.OldKeyPrefix = append(append([]byte{}, oldKeyspace...), rule.OldKeyPrefix...)
+				rule.NewKeyPrefix = codec.EncodeKey(rule.NewKeyPrefix)
+			}
+			return t
+		})
 	}
 
 	if cfg.tiflashRecorder != nil {
@@ -670,7 +721,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 		})
 	}
 
-	tableFileMap := restore.MapTableToFiles(files)
+	tableFileMap := restore.MapTableToFiles(files, backupMeta.ApiVersion)
 	log.Debug("mapped table to files", zap.Any("result map", tableFileMap))
 
 	rangeStream := restore.GoValidateFileRanges(
@@ -712,7 +763,7 @@ func RunRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 		int64(rangeSize+len(files)+len(tables)),
 		!cfg.LogProgress)
 	defer updateCh.Close()
-	sender, err := restore.NewTiKVSender(ctx, client, updateCh, cfg.PDConcurrency)
+	sender, err := restore.NewTiKVSender(ctx, client, updateCh, cfg.PDConcurrency, cfg.SkipSplit)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -829,7 +880,9 @@ func filterRestoreFiles(
 // restorePreWork executes some prepare work before restore.
 // TODO make this function returns a restore post work.
 func restorePreWork(ctx context.Context, client *restore.Client, mgr *conn.Mgr, switchToImport bool) (pdutil.UndoFunc, error) {
-	if client.IsOnline() {
+	// Do not remove scheduler or switch TiKV to import mode
+	// if using online restore or if keyspace is set.
+	if client.IsOnline() || client.IsKeyspaceMode() {
 		return pdutil.Nop, nil
 	}
 
@@ -850,7 +903,7 @@ func restorePostWork(
 		log.Warn("context canceled, try shutdown")
 		ctx = context.Background()
 	}
-	if client.IsOnline() {
+	if client.IsOnline() || client.IsKeyspaceMode() {
 		return
 	}
 	if err := client.SwitchToNormalMode(ctx); err != nil {

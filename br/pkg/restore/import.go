@@ -245,6 +245,9 @@ type FileImporter struct {
 	rawStartKey        []byte
 	rawEndKey          []byte
 	supportMultiIngest bool
+
+	// The api version in backup meta.
+	metaApiVersion kvrpcpb.APIVersion
 }
 
 // NewFileImporter returns a new file importClient.
@@ -253,12 +256,14 @@ func NewFileImporter(
 	importClient ImporterClient,
 	backend *backuppb.StorageBackend,
 	isRawKvMode bool,
+	version kvrpcpb.APIVersion,
 ) FileImporter {
 	return FileImporter{
-		metaClient:   metaClient,
-		backend:      backend,
-		importClient: importClient,
-		isRawKvMode:  isRawKvMode,
+		metaClient:     metaClient,
+		backend:        backend,
+		importClient:   importClient,
+		isRawKvMode:    isRawKvMode,
+		metaApiVersion: version,
 	}
 }
 
@@ -310,7 +315,7 @@ func (importer *FileImporter) getKeyRangeForFiles(
 		if importer.isRawKvMode {
 			start, end = f.GetStartKey(), f.GetEndKey()
 		} else {
-			start, end, err = GetRewriteRawKeys(f, rewriteRules)
+			start, end, err = GetRewriteRawKeys(f, rewriteRules, importer.metaApiVersion)
 			if err != nil {
 				return nil, nil, errors.Trace(err)
 			}
@@ -424,6 +429,7 @@ func (importer *FileImporter) ImportSSTFiles(
 	rewriteRules *RewriteRules,
 	cipher *backuppb.CipherInfo,
 	apiVersion kvrpcpb.APIVersion,
+	leaderDownload bool,
 ) error {
 	start := time.Now()
 	log.Debug("import file", logutil.Files(files))
@@ -450,7 +456,7 @@ func (importer *FileImporter) ImportSSTFiles(
 		for _, regionInfo := range regionInfos {
 			info := regionInfo
 			// Try to download file.
-			downloadMetas, errDownload := importer.download(ctx, info, files, rewriteRules, cipher, apiVersion)
+			downloadMetas, errDownload := importer.download(ctx, info, files, rewriteRules, cipher, apiVersion, leaderDownload)
 			if errDownload != nil {
 				for _, e := range multierr.Errors(errDownload) {
 					switch errors.Cause(e) { // nolint:errorlint
@@ -478,7 +484,7 @@ func (importer *FileImporter) ImportSSTFiles(
 			log.Debug("download file done",
 				zap.String("file-sample", files[0].Name), zap.Stringer("take", time.Since(start)),
 				logutil.Key("start", files[0].StartKey), logutil.Key("end", files[0].EndKey))
-			if errIngest := importer.ingest(ctx, info, downloadMetas); errIngest != nil {
+			if errIngest := importer.ingest(ctx, info, downloadMetas, leaderDownload); errIngest != nil {
 				log.Error("ingest file failed",
 					logutil.Files(files),
 					logutil.SSTMetas(downloadMetas),
@@ -513,6 +519,7 @@ func (importer *FileImporter) download(
 	rewriteRules *RewriteRules,
 	cipher *backuppb.CipherInfo,
 	apiVersion kvrpcpb.APIVersion,
+	leaderDownload bool,
 ) ([]*import_sstpb.SSTMeta, error) {
 	var (
 		downloadMetas = make([]*import_sstpb.SSTMeta, 0, len(files))
@@ -525,7 +532,7 @@ func (importer *FileImporter) download(
 			if importer.isRawKvMode {
 				downloadMeta, e = importer.downloadRawKVSST(ctx, regionInfo, f, cipher, apiVersion)
 			} else {
-				downloadMeta, e = importer.downloadSST(ctx, regionInfo, f, rewriteRules, cipher)
+				downloadMeta, e = importer.downloadSST(ctx, regionInfo, f, rewriteRules, cipher, apiVersion, leaderDownload)
 			}
 
 			failpoint.Inject("restore-storage-error", func(val failpoint.Value) {
@@ -542,7 +549,7 @@ func (importer *FileImporter) download(
 				if importer.isRawKvMode {
 					downloadMeta, e = importer.downloadRawKVSST(ctx, regionInfo, f, nil, apiVersion)
 				} else {
-					downloadMeta, e = importer.downloadSST(ctx, regionInfo, f, rewriteRules, nil)
+					downloadMeta, e = importer.downloadSST(ctx, regionInfo, f, rewriteRules, nil, apiVersion, leaderDownload)
 				}
 			}
 
@@ -566,6 +573,8 @@ func (importer *FileImporter) downloadSST(
 	file *backuppb.File,
 	rewriteRules *RewriteRules,
 	cipher *backuppb.CipherInfo,
+	apiVersion kvrpcpb.APIVersion,
+	leaderDownload bool,
 ) (*import_sstpb.SSTMeta, error) {
 	uid := uuid.New()
 	id := uid[:]
@@ -574,21 +583,23 @@ func (importer *FileImporter) downloadSST(
 	if fileRule == nil {
 		return nil, errors.Trace(berrors.ErrKVRewriteRuleNotFound)
 	}
-	rule := import_sstpb.RewriteRule{
-		OldKeyPrefix: encodeKeyPrefix(fileRule.GetOldKeyPrefix()),
-		NewKeyPrefix: encodeKeyPrefix(fileRule.GetNewKeyPrefix()),
+
+	sstMeta, err := GetSSTMetaFromFile(id, file, regionInfo.Region, fileRule)
+	if err != nil {
+		return nil, err
 	}
-	sstMeta := GetSSTMetaFromFile(id, file, regionInfo.Region, &rule)
 
 	req := &import_sstpb.DownloadRequest{
-		Sst:            sstMeta,
+		Sst:            *sstMeta,
 		StorageBackend: importer.backend,
 		Name:           file.GetName(),
-		RewriteRule:    rule,
+		RewriteRule:    *fileRule,
 		CipherInfo:     cipher,
+		// For the older version of TiDB, the request type will be default to `import_sstpb.RequestType_Legacy`
+		RequestType: import_sstpb.DownloadRequestType_Keyspace,
 	}
 	log.Debug("download SST",
-		logutil.SSTMeta(&sstMeta),
+		logutil.SSTMeta(sstMeta),
 		logutil.File(file),
 		logutil.Region(regionInfo.Region),
 		logutil.Leader(regionInfo.Leader),
@@ -596,7 +607,12 @@ func (importer *FileImporter) downloadSST(
 
 	var atomicResp atomic.Value
 	eg, ectx := errgroup.WithContext(ctx)
+
 	for _, p := range regionInfo.Region.GetPeers() {
+		if leaderDownload && p.String() != regionInfo.Leader.String() {
+			log.Debug("leader-download is true, current peer not leader, skip download on current peer")
+			continue
+		}
 		peer := p
 		eg.Go(func() error {
 			resp, err := importer.importClient.DownloadSST(ectx, peer.GetStoreId(), req)
@@ -614,7 +630,7 @@ func (importer *FileImporter) downloadSST(
 				logutil.Region(regionInfo.Region),
 				logutil.Peer(peer),
 				logutil.Key("resp-range-start", resp.Range.Start),
-				logutil.Key("resp-range-end", resp.Range.Start),
+				logutil.Key("resp-range-end", resp.Range.End),
 				zap.Bool("resp-isempty", resp.IsEmpty),
 				zap.Uint32("resp-crc32", resp.Crc32),
 			)
@@ -629,7 +645,8 @@ func (importer *FileImporter) downloadSST(
 	downloadResp := atomicResp.Load().(*import_sstpb.DownloadResponse)
 	sstMeta.Range.Start = TruncateTS(downloadResp.Range.GetStart())
 	sstMeta.Range.End = TruncateTS(downloadResp.Range.GetEnd())
-	return &sstMeta, nil
+	sstMeta.ApiVersion = apiVersion
+	return sstMeta, nil
 }
 
 func (importer *FileImporter) downloadRawKVSST(
@@ -643,7 +660,10 @@ func (importer *FileImporter) downloadRawKVSST(
 	id := uid[:]
 	// Empty rule
 	var rule import_sstpb.RewriteRule
-	sstMeta := GetSSTMetaFromFile(id, file, regionInfo.Region, &rule)
+	sstMeta, err := GetSSTMetaFromFile(id, file, regionInfo.Region, &rule)
+	if err != nil {
+		return nil, err
+	}
 
 	// Cut the SST file's range to fit in the restoring range.
 	if bytes.Compare(importer.rawStartKey, sstMeta.Range.GetStart()) > 0 {
@@ -659,14 +679,14 @@ func (importer *FileImporter) downloadRawKVSST(
 	}
 
 	req := &import_sstpb.DownloadRequest{
-		Sst:            sstMeta,
+		Sst:            *sstMeta,
 		StorageBackend: importer.backend,
 		Name:           file.GetName(),
 		RewriteRule:    rule,
 		IsRawKv:        true,
 		CipherInfo:     cipher,
 	}
-	log.Debug("download SST", logutil.SSTMeta(&sstMeta), logutil.Region(regionInfo.Region))
+	log.Debug("download SST", logutil.SSTMeta(sstMeta), logutil.Region(regionInfo.Region))
 
 	var atomicResp atomic.Value
 	eg, ectx := errgroup.WithContext(ctx)
@@ -697,13 +717,14 @@ func (importer *FileImporter) downloadRawKVSST(
 	sstMeta.Range.Start = downloadResp.Range.GetStart()
 	sstMeta.Range.End = downloadResp.Range.GetEnd()
 	sstMeta.ApiVersion = apiVersion
-	return &sstMeta, nil
+	return sstMeta, nil
 }
 
 func (importer *FileImporter) ingest(
 	ctx context.Context,
 	info *split.RegionInfo,
 	downloadMetas []*import_sstpb.SSTMeta,
+	leaderDownload bool,
 ) error {
 	for {
 		ingestResp, errIngest := importer.ingestSSTs(ctx, downloadMetas, info)
@@ -716,6 +737,11 @@ func (importer *FileImporter) ingest(
 		case errPb == nil:
 			return nil
 		case errPb.NotLeader != nil:
+			// If LeaderDownload is true, when leader changed, it will need to retry download.
+			if leaderDownload {
+				return errors.Trace(berrors.ErrKVNotLeader)
+			}
+
 			// If error is `NotLeader`, update the region info and retry
 			var newInfo *split.RegionInfo
 			if newLeader := errPb.GetNotLeader().GetLeader(); newLeader != nil {
@@ -743,6 +769,7 @@ func (importer *FileImporter) ingest(
 			if !split.CheckRegionEpoch(newInfo, info) {
 				return errors.Trace(berrors.ErrKVEpochNotMatch)
 			}
+
 			log.Debug("ingest sst returns not leader error, retry it",
 				logutil.Region(info.Region),
 				zap.Stringer("newLeader", newInfo.Leader))

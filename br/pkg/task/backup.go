@@ -26,6 +26,8 @@ import (
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tidb/br/pkg/summary"
 	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/keyspace"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/sessionctx/stmtctx"
 	"github.com/pingcap/tidb/statistics/handle"
@@ -45,6 +47,7 @@ const (
 	flagRemoveSchedulers = "remove-schedulers"
 	flagIgnoreStats      = "ignore-stats"
 	flagUseBackupMetaV2  = "use-backupmeta-v2"
+	flagKeyspaceName     = "keyspace-name"
 
 	flagGCTTL = "gcttl"
 
@@ -118,6 +121,8 @@ func DefineBackupFlags(flags *pflag.FlagSet) {
 
 	flags.Bool(flagUseBackupMetaV2, false,
 		"use backup meta v2 to store meta info")
+
+	flags.String(flagKeyspaceName, "", "keyspace name for backup")
 	// This flag will change the structure of backupmeta.
 	// we must make sure the old three version of br can parse the v2 meta to keep compatibility.
 	// so this flag should set to false for three version by default.
@@ -174,6 +179,10 @@ func (cfg *BackupConfig) ParseFromFlags(flags *pflag.FlagSet) error {
 		return errors.Trace(err)
 	}
 	cfg.UseBackupMetaV2, err = flags.GetBool(flagUseBackupMetaV2)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	cfg.KeyspaceName, err = flags.GetString(flagKeyspaceName)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -276,6 +285,9 @@ func isFullBackup(cmdName string) bool {
 // RunBackup starts a backup task inside the current goroutine.
 func RunBackup(c context.Context, g glue.Glue, cmdName string, cfg *BackupConfig) error {
 	cfg.Adjust()
+	config.UpdateGlobal(func(conf *config.Config) {
+		conf.KeyspaceName = cfg.KeyspaceName
+	})
 
 	defer summary.Summary(cmdName)
 	ctx, cancel := context.WithCancel(c)
@@ -346,7 +358,7 @@ func RunBackup(c context.Context, g glue.Glue, cmdName string, cfg *BackupConfig
 	sp := utils.BRServiceSafePoint{
 		BackupTS: backupTS,
 		TTL:      client.GetGCTTL(),
-		ID:       utils.MakeSafePointID(),
+		ID:       utils.MakeSafePointID(mgr.GetStorage().GetCodec().GetKeyspace()),
 	}
 	// use lastBackupTS as safePoint if exists
 	if cfg.LastBackupTS > 0 {
@@ -361,7 +373,9 @@ func RunBackup(c context.Context, g glue.Glue, cmdName string, cfg *BackupConfig
 
 	isIncrementalBackup := cfg.LastBackupTS > 0
 
-	if cfg.RemoveSchedulers {
+	if cfg.RemoveSchedulers && !keyspace.IsKeyspaceNameEmpty(cfg.KeyspaceName) {
+		log.Info("skip removing PD schedulers while backing up specific keyspace's data")
+	} else if cfg.RemoveSchedulers {
 		log.Debug("removing some PD schedulers")
 		restore, e := mgr.RemoveSchedulers(ctx)
 		defer func() {
@@ -399,6 +413,11 @@ func RunBackup(c context.Context, g glue.Glue, cmdName string, cfg *BackupConfig
 	if err != nil {
 		return errors.Trace(err)
 	}
+	// Add keyspace prefix to BackupRequest
+	for i := range ranges {
+		start, end := ranges[i].StartKey, ranges[i].EndKey
+		ranges[i].StartKey, ranges[i].EndKey = mgr.GetStorage().GetCodec().EncodeRange(start, end)
+	}
 
 	// Metafile size should be less than 64MB.
 	metawriter := metautil.NewMetaWriter(client.GetStorage(),
@@ -412,6 +431,7 @@ func RunBackup(c context.Context, g glue.Glue, cmdName string, cfg *BackupConfig
 		m.ClusterVersion = clusterVersion
 		m.BrVersion = brVersion
 		m.NewCollationsEnabled = newCollationEnable
+		m.ApiVersion = mgr.GetStorage().GetCodec().GetAPIVersion()
 	})
 
 	log.Info("get placement policies", zap.Int("count", len(policies)))

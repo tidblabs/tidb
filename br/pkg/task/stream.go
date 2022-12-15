@@ -546,7 +546,7 @@ func RunStreamStart(
 		if err = streamMgr.setGCSafePoint(
 			ctx,
 			utils.BRServiceSafePoint{
-				ID:       utils.MakeSafePointID(),
+				ID:       utils.MakeSafePointID(streamMgr.mgr.GetStorage().GetCodec().GetKeyspace()),
 				TTL:      cfg.SafePointTTL,
 				BackupTS: cfg.StartTS,
 			},
@@ -557,7 +557,7 @@ func RunStreamStart(
 		if err = streamMgr.setGCSafePoint(
 			ctx,
 			utils.BRServiceSafePoint{
-				ID:       utils.MakeSafePointID(),
+				ID:       utils.MakeSafePointID(streamMgr.mgr.GetStorage().GetCodec().GetKeyspace()),
 				TTL:      cfg.SafePointTTL,
 				BackupTS: cfg.StartTS,
 			},

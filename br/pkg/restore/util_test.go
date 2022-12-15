@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
+
 	"github.com/pingcap/failpoint"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
@@ -49,10 +51,11 @@ func TestGetSSTMetaFromFile(t *testing.T) {
 		NewKeyPrefix: []byte("t2"),
 	}
 	region := &metapb.Region{
-		StartKey: []byte("t2abc"),
-		EndKey:   []byte("t3a"),
+		StartKey: codec.EncodeBytes([]byte{}, []byte("t2abc")),
+		EndKey:   codec.EncodeBytes([]byte{}, []byte("t3a")),
 	}
-	sstMeta := restore.GetSSTMetaFromFile([]byte{}, file, region, rule)
+	sstMeta, err := restore.GetSSTMetaFromFile([]byte{}, file, region, rule)
+	require.Nil(t, err)
 	require.Equal(t, "t2abc", string(sstMeta.GetRange().GetStart()))
 	require.Equal(t, "t2\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", string(sstMeta.GetRange().GetEnd()))
 }
@@ -88,7 +91,7 @@ func TestMapTableToFiles(t *testing.T) {
 		},
 	}
 
-	result := restore.MapTableToFiles(append(filesOfTable2, filesOfTable1...))
+	result := restore.MapTableToFiles(append(filesOfTable2, filesOfTable1...), kvrpcpb.APIVersion_V1)
 
 	require.Equal(t, filesOfTable1, result[1])
 	require.Equal(t, filesOfTable2, result[2])
@@ -315,7 +318,7 @@ func TestRewriteFileKeys(t *testing.T) {
 		StartKey: tablecodec.GenTableRecordPrefix(1),
 		EndKey:   tablecodec.GenTableRecordPrefix(1).PrefixNext(),
 	}
-	start, end, err := restore.GetRewriteRawKeys(&rawKeyFile, &rewriteRules)
+	start, end, err := restore.GetRewriteRawKeys(&rawKeyFile, &rewriteRules, kvrpcpb.APIVersion_V1)
 	require.NoError(t, err)
 	_, end, err = codec.DecodeBytes(end, nil)
 	require.NoError(t, err)
@@ -341,7 +344,7 @@ func TestRewriteFileKeys(t *testing.T) {
 		EndKey:   codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(767).PrefixNext()),
 	}
 	// use raw rewrite should no error but not equal
-	start, end, err = restore.GetRewriteRawKeys(&encodeKeyFile767, &rewriteRules)
+	start, end, err = restore.GetRewriteRawKeys(&encodeKeyFile767, &rewriteRules, kvrpcpb.APIVersion_V1)
 	require.NoError(t, err)
 	require.NotEqual(t, codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(511)), start)
 	require.NotEqual(t, codec.EncodeBytes(nil, tablecodec.GenTableRecordPrefix(511).PrefixNext()), end)

@@ -12,6 +12,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"github.com/pingcap/tidb/keyspace"
 	"github.com/tikv/client-go/v2/oracle"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
@@ -19,9 +20,11 @@ import (
 )
 
 const (
-	brServiceSafePointIDFormat      = "br-%s"
-	preUpdateServiceSafePointFactor = 3
-	checkGCSafePointGapTime         = 5 * time.Second
+	brServiceSafePointIDFormat = "br-%s"
+	// brKeyspaceServiceSafePointIDFormat is used when a specific keyspace is given.
+	brKeyspaceServiceSafePointIDFormat = "br-%d-%s"
+	preUpdateServiceSafePointFactor    = 3
+	checkGCSafePointGapTime            = 5 * time.Second
 	// DefaultBRGCSafePointTTL means PD keep safePoint limit at least 5min.
 	DefaultBRGCSafePointTTL = 5 * 60
 	// DefaultStreamStartSafePointTTL specifies keeping the server safepoint 30 mins when start task.
@@ -59,7 +62,12 @@ func getGCSafePoint(ctx context.Context, pdClient pd.Client) (uint64, error) {
 }
 
 // MakeSafePointID makes a unique safe point ID, for reduce name conflict.
-func MakeSafePointID() string {
+// If an optional keyspace string is given, it will encode it into the safe point ID
+// to further reduce the probability of collision when multiple keyspaces have BR running.
+func MakeSafePointID(keyspacePrefix []byte) string {
+	if len(keyspacePrefix) > 0 {
+		return fmt.Sprintf(brKeyspaceServiceSafePointIDFormat, keyspace.GetID(keyspacePrefix), uuid.New())
+	}
 	return fmt.Sprintf(brServiceSafePointIDFormat, uuid.New())
 }
 

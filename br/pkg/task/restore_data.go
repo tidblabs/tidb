@@ -82,7 +82,7 @@ func RunResolveKvData(c context.Context, g glue.Glue, cmdName string, cfg *Resto
 	sp := utils.BRServiceSafePoint{
 		BackupTS: restoreTS,
 		TTL:      utils.DefaultBRGCSafePointTTL,
-		ID:       utils.MakeSafePointID(),
+		ID:       utils.MakeSafePointID(mgr.GetStorage().GetCodec().GetKeyspace()),
 	}
 
 	// TODO: since data restore does not have tidb up, it looks we can remove this keeper

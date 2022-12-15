@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/failpoint"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/br/pkg/backup"
@@ -42,6 +43,7 @@ import (
 	"github.com/pingcap/tidb/config"
 	ddlutil "github.com/pingcap/tidb/ddl/util"
 	"github.com/pingcap/tidb/domain"
+	"github.com/pingcap/tidb/keyspace"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/parser/model"
@@ -165,6 +167,11 @@ type Client struct {
 
 	// the successfully preallocated table IDs.
 	preallocedTableIDs *tidalloc.PreallocIDs
+	// Target keyspace's name for the data restoration.
+	keyspaceName string
+
+	// leaderdown is true means it's just download on leader
+	leaderDownload bool
 }
 
 // NewRestoreClient returns a new RestoreClient.
@@ -251,6 +258,11 @@ func (rc *Client) allocTableIDs(ctx context.Context, tables []*metautil.Table) e
 
 // SetPlacementPolicyMode to policy mode.
 func (rc *Client) SetPlacementPolicyMode(withPlacementPolicy string) {
+	if rc.IsKeyspaceMode() {
+		log.Info("ignore placement policy when keyspaceName is set", zap.String("mode", rc.policyMode))
+		rc.policyMode = ignorePlacementPolicyMode
+		return
+	}
 	switch strings.ToUpper(withPlacementPolicy) {
 	case strictPlacementPolicyMode:
 		rc.policyMode = strictPlacementPolicyMode
@@ -342,7 +354,7 @@ func (rc *Client) SetStorage(ctx context.Context, backend *backuppb.StorageBacke
 func (rc *Client) InitClients(backend *backuppb.StorageBackend, isRawKvMode bool) {
 	metaClient := split.NewSplitClient(rc.pdClient, rc.tlsConf, isRawKvMode)
 	importCli := NewImportClient(metaClient, rc.tlsConf, rc.keepaliveConf)
-	rc.fileImporter = NewFileImporter(metaClient, importCli, backend, isRawKvMode)
+	rc.fileImporter = NewFileImporter(metaClient, importCli, backend, isRawKvMode, rc.backupMeta.ApiVersion)
 }
 
 func (rc *Client) SetRawKVClient(c *RawKVBatchClient) {
@@ -866,7 +878,7 @@ func (rc *Client) createTablesInWorkerPool(ctx context.Context, dom *domain.Doma
 				}
 			})
 			if err != nil {
-				log.Error("create tables fail")
+				log.Error("create tables fail", zap.Error(err))
 				return err
 			}
 			for _, ct := range cts {
@@ -1006,7 +1018,7 @@ func MockCallSetSpeedLimit(ctx context.Context, fakeImportClient ImporterClient,
 	rc.SetRateLimit(42)
 	rc.SetConcurrency(concurrency)
 	rc.hasSpeedLimited = false
-	rc.fileImporter = NewFileImporter(nil, fakeImportClient, nil, false)
+	rc.fileImporter = NewFileImporter(nil, fakeImportClient, nil, false, kvrpcpb.APIVersion_V1)
 	return rc.setSpeedLimit(ctx, rc.rateLimit)
 }
 
@@ -1134,7 +1146,7 @@ func (rc *Client) RestoreSSTFiles(
 						zap.Duration("take", time.Since(fileStart)))
 					updateCh.Inc()
 				}()
-				return rc.fileImporter.ImportSSTFiles(ectx, filesReplica, rewriteRules, rc.cipher, rc.backupMeta.ApiVersion)
+				return rc.fileImporter.ImportSSTFiles(ectx, filesReplica, rewriteRules, rc.cipher, rc.dom.Store().GetCodec().GetAPIVersion(), rc.leaderDownload)
 			})
 	}
 
@@ -1175,7 +1187,7 @@ func (rc *Client) RestoreRaw(
 		rc.workerPool.ApplyOnErrorGroup(eg,
 			func() error {
 				defer updateCh.Inc()
-				return rc.fileImporter.ImportSSTFiles(ectx, []*backuppb.File{fileReplica}, EmptyRewriteRule(), rc.cipher, rc.backupMeta.ApiVersion)
+				return rc.fileImporter.ImportSSTFiles(ectx, []*backuppb.File{fileReplica}, EmptyRewriteRule(), rc.cipher, rc.backupMeta.ApiVersion, rc.leaderDownload)
 			})
 	}
 	if err := eg.Wait(); err != nil {
@@ -1386,6 +1398,8 @@ func (rc *Client) execChecksum(
 	exe, err := checksum.NewExecutorBuilder(tbl.Table, startTS).
 		SetOldTable(tbl.OldTable).
 		SetConcurrency(concurrency).
+		SetOldKeyspace(tbl.RewriteRule.OldKeyspace).
+		SetNewKeyspace(tbl.RewriteRule.NewKeyspace).
 		Build()
 	if err != nil {
 		return errors.Trace(err)
@@ -1501,8 +1515,10 @@ func (rc *Client) ResetRestoreLabels(ctx context.Context) error {
 }
 
 // SetupPlacementRules sets rules for the tables' regions.
+// This is only performed when using Online Restore mode with at least one restore stores.
+// This is also skipped when keyspaceName is set.
 func (rc *Client) SetupPlacementRules(ctx context.Context, tables []*model.TableInfo) error {
-	if !rc.isOnline || len(rc.restoreStores) == 0 {
+	if !rc.isOnline || len(rc.restoreStores) == 0 || rc.IsKeyspaceMode() {
 		return nil
 	}
 	log.Info("start setting placement rules")
@@ -1532,7 +1548,7 @@ func (rc *Client) SetupPlacementRules(ctx context.Context, tables []*model.Table
 
 // WaitPlacementSchedule waits PD to move tables to restore stores.
 func (rc *Client) WaitPlacementSchedule(ctx context.Context, tables []*model.TableInfo) error {
-	if !rc.isOnline || len(rc.restoreStores) == 0 {
+	if !rc.isOnline || len(rc.restoreStores) == 0 || rc.IsKeyspaceMode() {
 		return nil
 	}
 	log.Info("start waiting placement schedule")
@@ -1592,7 +1608,7 @@ func (rc *Client) checkRange(ctx context.Context, start, end []byte) (bool, stri
 
 // ResetPlacementRules removes placement rules for tables.
 func (rc *Client) ResetPlacementRules(ctx context.Context, tables []*model.TableInfo) error {
-	if !rc.isOnline || len(rc.restoreStores) == 0 {
+	if !rc.isOnline || len(rc.restoreStores) == 0 || rc.IsKeyspaceMode() {
 		return nil
 	}
 	log.Info("start reseting placement rules")
@@ -2462,6 +2478,21 @@ func (rc *Client) IsFullClusterRestore() bool {
 
 func (rc *Client) SetWithSysTable(withSysTable bool) {
 	rc.withSysTable = withSysTable
+}
+
+// SetKeyspaceName set the keyspace name for the restore client.
+func (rc *Client) SetKeyspaceName(keyspaceName string) {
+	rc.keyspaceName = keyspaceName
+}
+
+// SetLeaderDownload set whether just download on leader.
+func (rc *Client) SetLeaderDownload(leaderDownload bool) {
+	rc.leaderDownload = leaderDownload
+}
+
+// IsKeyspaceMode indicates whether BR is restoring a specific keyspace's data.
+func (rc *Client) IsKeyspaceMode() bool {
+	return !keyspace.IsKeyspaceNameEmpty(rc.keyspaceName)
 }
 
 // MockClient create a fake client used to test.
