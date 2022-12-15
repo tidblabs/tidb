@@ -2085,6 +2085,11 @@ func inTestSuite() bool {
 // doDMLWorks executes DML statements in bootstrap stage.
 // All the statements run in a single transaction.
 func doDMLWorks(s Session) {
+	rootUserName := "root"
+	if prefix := domain.GetUserPrefix(); prefix != "" {
+		rootUserName = prefix + "." + rootUserName
+	}
+
 	mustExecute(s, "BEGIN")
 	if config.GetGlobalConfig().Security.SecureBootstrap {
 		// If secure bootstrap is enabled, we create a root@localhost account which can login with auth_socket.
@@ -2095,10 +2100,11 @@ func doDMLWorks(s Session) {
 			logutil.BgLogger().Fatal("failed to read current user. unable to secure bootstrap.", zap.Error(err))
 		}
 		mustExecute(s, `INSERT HIGH_PRIORITY INTO mysql.user VALUES
-		("localhost", "root", %?, "auth_socket", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "N", "Y", "Y", "Y", "Y", "Y", null, "")`, u.Username)
+		("localhost", %?, %?, "auth_socket", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "N", "Y", "Y", "Y", "Y", "Y", null, "")`, rootUserName, u.Username)
 	} else {
+		logutil.BgLogger().Warn("!!!!!", zap.String("root user name", rootUserName))
 		mustExecute(s, `INSERT HIGH_PRIORITY INTO mysql.user VALUES
-		("%", "root", "", "mysql_native_password", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "N", "Y", "Y", "Y", "Y", "Y", null, "")`)
+		("%", %?, "", "mysql_native_password", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "N", "Y", "Y", "Y", "Y", "Y", null, "")`, rootUserName)
 	}
 
 	// For GLOBAL scoped system variables, insert the initial value

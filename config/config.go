@@ -262,6 +262,18 @@ type Config struct {
 	TrxSummary       TrxSummary `toml:"transaction-summary" json:"transaction-summary"`
 	EnableGlobalKill bool       `toml:"enable-global-kill" json:"enable-global-kill"`
 
+	// Keyspace and serverless related configs.
+
+	// BootstrapSQLFile is the path to SQL file to run during bootstrap.
+	BootstrapSQLFile string `toml:"bootstrap-sql-file" json:"bootstrap-sql-file"`
+	// BootstrapSQLParams is the parameters for bootstrap SQL file.
+	BootstrapSQLParams   map[string]string `toml:"bootstra-sql-params" json:"bootstrap-sql-params"`
+	StandByMode          bool              `toml:"standby" json:"standby"`
+	KeyspaceActivateMode bool              `toml:"keyspace-activate" json:"keyspace-activate"`
+	MaxIdleSeconds       uint              `toml:"max-idle-seconds" json:"max-idle-seconds"`
+	// ActivationTimeout specifies the maximum allowed time for tidb to activate from standby mode.
+	ActivationTimeout uint `toml:"activation-timeout" json:"activation-timeout"`
+
 	// The following items are deprecated. We need to keep them here temporarily
 	// to support the upgrade process. They can be removed in future.
 
@@ -1295,6 +1307,11 @@ func (c *Config) Valid() error {
 	}
 	if c.Performance.StatsLoadQueueSize < DefStatsLoadQueueSizeLimit || c.Performance.StatsLoadQueueSize > DefMaxOfStatsLoadQueueSizeLimit {
 		return fmt.Errorf("stats-load-queue-size should be [%d, %d]", DefStatsLoadQueueSizeLimit, DefMaxOfStatsLoadQueueSizeLimit)
+	}
+
+	// check mode
+	if c.StandByMode && c.KeyspaceActivateMode {
+		return fmt.Errorf("can't set standby and keyspace-activate mode at the same time")
 	}
 
 	// test log level

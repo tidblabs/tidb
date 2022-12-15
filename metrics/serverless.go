@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2022 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package versioninfo
+package metrics
 
-const (
-	// CommunityEdition is the default edition for building.
-	CommunityEdition = "Community"
-)
-
-// Version information.
+// Identify serverless cluster. Should be setup before register metrics.
 var (
-	TiDBBuildTS   = "None"
-	TiDBGitHash   = "None"
-	TiDBGitBranch = "None"
-	TiDBEdition   = CommunityEdition
-
-	ServerlessTiDBGitBranch = "None"
-	// TiKVMinVersion is the minimum version of TiKV that can be compatible with the current TiDB.
-	TiKVMinVersion = "6.2.0-alpha"
+	ServerlessTenantID  string
+	ServerlessProjectID string
+	ServerlessClusterID string
 )

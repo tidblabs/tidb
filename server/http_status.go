@@ -44,6 +44,7 @@ import (
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
+	"github.com/pingcap/tidb/standby"
 	"github.com/pingcap/tidb/store"
 	"github.com/pingcap/tidb/util"
 	"github.com/pingcap/tidb/util/cpuprofile"
@@ -279,6 +280,9 @@ func (s *Server) startHTTPServer() {
 
 	serverMux := http.NewServeMux()
 	serverMux.Handle("/", router)
+	if s.cfg.StandByMode {
+		serverMux.Handle("/tidb-pool/", standby.Handler())
+	}
 
 	serverMux.HandleFunc("/debug/pprof/", pprof.Index)
 	serverMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)

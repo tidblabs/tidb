@@ -810,6 +810,8 @@ func (e *SimpleExec) executeCreateUser(ctx context.Context, s *ast.CreateUserStm
 		return err
 	}
 
+	userPrefix := domain.GetUserPrefix()
+
 	lockAccount := "N"
 	if length := len(s.PasswordOrLockOptions); length > 0 {
 		// If "ACCOUNT LOCK" or "ACCOUNT UNLOCK" appears many times,
@@ -849,6 +851,9 @@ func (e *SimpleExec) executeCreateUser(ctx context.Context, s *ast.CreateUserStm
 
 	users := make([]*auth.UserIdentity, 0, len(s.Specs))
 	for _, spec := range s.Specs {
+		if userPrefix != "" && !s.IsCreateRole && !strings.HasPrefix(spec.User.Username, userPrefix+".") && spec.User.Username != "cloud_admin" {
+			return ErrUserNameNeedPrefix.GenWithStackByArgs(userPrefix, userPrefix, spec.User.Username)
+		}
 		if len(spec.User.Username) > auth.UserNameMaxLength {
 			return ErrWrongStringLength.GenWithStackByArgs(spec.User.Username, "user name", auth.UserNameMaxLength)
 		}

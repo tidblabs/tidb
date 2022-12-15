@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2022 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package versioninfo
+package domain
 
-const (
-	// CommunityEdition is the default edition for building.
-	CommunityEdition = "Community"
+import (
+	"os"
+
+	keyspace2 "github.com/pingcap/tidb/keyspace"
 )
 
-// Version information.
-var (
-	TiDBBuildTS   = "None"
-	TiDBGitHash   = "None"
-	TiDBGitBranch = "None"
-	TiDBEdition   = CommunityEdition
-
-	ServerlessTiDBGitBranch = "None"
-	// TiKVMinVersion is the minimum version of TiKV that can be compatible with the current TiDB.
-	TiKVMinVersion = "6.2.0-alpha"
-)
+// GetUserPrefix returns user prefix which be either specified by keyspace or environment variable.
+func GetUserPrefix() string {
+	if keyspace := keyspace2.GetKeyspaceNameBySettings(); keyspace != "" {
+		return keyspace
+	}
+	return os.Getenv("TIDB_USER_PREFIX")
+}

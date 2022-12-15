@@ -62,6 +62,13 @@ const (
 	tidbGCLeaderDesc      = "tidb_gc_leader_desc"
 	restrictedPriv        = "RESTRICTED_"
 	tidbAuditRetractLog   = "tidb_audit_redact_log" // sysvar installed by a plugin
+
+	// Additional tables for serverless tier.
+	clusterInfo      = "cluster_info"
+	tikvRegionStatus = "tikv_region_status"
+	tikvStoreStatus  = "tikv_store_status"
+	tiflashSegments  = "tiflash_segments"
+	tiflashTables    = "tiflash_tables"
 )
 
 var (
@@ -111,7 +118,8 @@ func IsInvisibleTable(dbLowerName, tblLowerName string) bool {
 	case informationSchema:
 		switch tblLowerName {
 		case clusterConfig, clusterHardware, clusterLoad, clusterLog, clusterSystemInfo, inspectionResult,
-			inspectionRules, inspectionSummary, metricsSummary, metricsSummaryByLabel, metricsTables, tidbHotRegions:
+			inspectionRules, inspectionSummary, metricsSummary, metricsSummaryByLabel, metricsTables, tidbHotRegions,
+			clusterInfo, tikvRegionStatus, tikvStoreStatus, tiflashSegments, tiflashTables:
 			return true
 		}
 	case performanceSchema:
