@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/resource_manager"
 	us "github.com/pingcap/tidb/store/mockstore/unistore/tikv"
 	pd "github.com/tikv/pd/client"
 )
@@ -175,5 +176,18 @@ func (c *pdClient) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.K
 // The first message in stream contains all current keyspaceMeta,
 // all subsequent messages contains new put events for all keyspaces.
 func (c *pdClient) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
+	return nil, nil
+}
+
+func (c *pdClient) ListResourceGroups(ctx context.Context) ([]*resource_manager.ResourceGroup, error) {
+	return nil, nil
+}
+func (c *pdClient) GetResourceGroup(ctx context.Context, resourceGroupName string) (*resource_manager.ResourceGroup, error) {
+	return nil, nil
+}
+func (c *pdClient) AddResourceGroup(ctx context.Context, resourceGroupName string, settings *resource_manager.GroupSettings) ([]byte, error) {
+	return nil, nil
+}
+func (c *pdClient) AcquireTokenBuckets(ctx context.Context, resourceGroupName string, targetRequestPeriodMs uint64, requestedResource []*resource_manager.ResourceDetail, consumptionSinceLastRequest []resource_manager.ResourceDetail) ([]*resource_manager.GrantedTokenBucket, error) {
 	return nil, nil
 }

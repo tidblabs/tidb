@@ -305,6 +305,10 @@ func createStoreAndDomain() (kv.Storage, *domain.Domain) {
 	storage, err := kvstore.New(fullPath)
 	terror.MustNil(err)
 	err = infosync.CheckTiKVVersion(storage, *semver.New(versioninfo.TiKVMinVersion))
+	if driver.IsTiKVStorage(storage) {
+		err := driver.SetUpTenantContorller(storage, cfg.AdvertiseAddress)
+		terror.MustNil(err)
+	}
 	terror.MustNil(err)
 	// Bootstrap a session to load information schema.
 	dom, err := session.BootstrapSession(storage)

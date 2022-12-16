@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/client-go/v2/tikvrpc"
 	"github.com/tikv/client-go/v2/util"
 	pd "github.com/tikv/pd/client"
+	pd_rm "github.com/tikv/pd/pkg/resourcecontroller"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -182,6 +183,29 @@ func (d TiKVDriver) OpenWithOptions(path string, options ...Option) (kv.Storage,
 
 	mc.cache[uuid] = store
 	return store, nil
+}
+
+// IsTiKVStore checks whether or not store is a tikv store.
+func IsTiKVStorage(s kv.Storage) bool {
+	_, ok := s.(*tikvStore)
+	return ok
+}
+
+// SetUpTenantContorller sets up tenant controller.
+func SetUpTenantContorller(s kv.Storage, id string) error {
+	var store *tikvStore
+	var ok = false
+	if store, ok = s.(*tikvStore); !ok {
+		errors.New("invalid storage")
+	}
+	tenantKVControllor, err := pd_rm.NewResourceGroupController(store.GetPDClient())
+	if err != nil {
+		return err
+	}
+	// TODO: fix me
+	tenantKVControllor.Start(context.Background(), id)
+	tikv.SetUpResourceInterceptor(tenantKVControllor)
+	return nil
 }
 
 type tikvStore struct {
