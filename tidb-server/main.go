@@ -30,6 +30,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/bindinfo"
 	"github.com/pingcap/tidb/config"
@@ -38,6 +39,7 @@ import (
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/executor"
 	"github.com/pingcap/tidb/extension"
+	"github.com/pingcap/tidb/infoschema"
 	"github.com/pingcap/tidb/keyspace"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
@@ -54,7 +56,9 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/standby"
 	"github.com/pingcap/tidb/statistics"
+	statshandler "github.com/pingcap/tidb/statistics/handle"
 	kvstore "github.com/pingcap/tidb/store"
+	"github.com/pingcap/tidb/store/copr"
 	"github.com/pingcap/tidb/store/driver"
 	"github.com/pingcap/tidb/store/mockstore"
 	uni_metrics "github.com/pingcap/tidb/store/mockstore/unistore/metrics"
@@ -75,6 +79,7 @@ import (
 	storageSys "github.com/pingcap/tidb/util/sys/storage"
 	"github.com/pingcap/tidb/util/systimemon"
 	"github.com/pingcap/tidb/util/topsql"
+	"github.com/pingcap/tidb/util/topsql/reporter"
 	"github.com/pingcap/tidb/util/versioninfo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -227,34 +232,14 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		// load keyspace and set metric labels.
-		cfg := config.GetGlobalConfig()
-		if strings.ToLower(cfg.Store) == "tikv" {
-			etcdAddrs, _, _, err := tikvconfig.ParsePath("tikv://" + cfg.Path)
-			mainErrHandler(err)
-			pdCli, err := pd.NewClient(etcdAddrs, pd.SecurityOption{
-				CAPath:   cfg.Security.ClusterSSLCA,
-				CertPath: cfg.Security.ClusterSSLCert,
-				KeyPath:  cfg.Security.ClusterSSLKey,
-			},
-				pd.WithCustomTimeoutOption(time.Duration(cfg.PDClient.PDServerTimeout)*time.Second),
-			)
-			mainErrHandler(err)
-			keyspaceMeta, err := pdCli.LoadKeyspace(context.TODO(), activateRequest.KeyspaceName)
-			mainErrHandler(err)
-			metrics.ServerlessTenantID = keyspaceMeta.Config["serverless_tenant_id"]
-			metrics.ServerlessProjectID = keyspaceMeta.Config["serverless_project_id"]
-			metrics.ServerlessClusterID = keyspaceMeta.Config["serverless_cluster_id"]
-			log.Info("serverless cluster info loaded",
-				zap.String("tenant-id", metrics.ServerlessTenantID),
-				zap.String("project-id", metrics.ServerlessProjectID),
-				zap.String("cluster-id", metrics.ServerlessClusterID),
-			)
-			pdCli.Close()
-		}
 	}
 
 	registerStores()
+
+	// load keyspace and set metric labels.
+	err := getServerlessInfo()
+	mainErrHandler(err)
+
 	registerMetrics()
 	if variable.EnableTmpStorageOnOOM.Load() {
 		config.GetGlobalConfig().UpdateTempStoragePath()
@@ -266,7 +251,7 @@ func main() {
 	setupLog()
 	setupExtensions()
 
-	err := cpuprofile.StartCPUProfiler()
+	err = cpuprofile.StartCPUProfiler()
 	mainErrHandler(err)
 
 	// Enable failpoints in tikv/client-go if the test API is enabled.
@@ -297,11 +282,7 @@ func main() {
 	mainErrHandler(err)
 	svr := createServer(storage, dom)
 
-	err = startRateLimit()
-	terror.MustNil(err)
-
 	session.RunBootstrapSQL(storage)
-
 
 	// Register error API is not thread-safe, the caller MUST NOT register errors after initialization.
 	// To prevent misuse, set a flag to indicate that register new error will panic immediately.
@@ -324,6 +305,57 @@ func main() {
 	terror.MustNil(svr.Run())
 	<-exited
 	syncLog()
+}
+
+func getServerlessInfo() error {
+	// load keyspace and set metric labels.
+	cfg := config.GetGlobalConfig()
+	if keyspace.IsKeyspaceNameEmpty(cfg.KeyspaceName) || strings.ToLower(cfg.Store) != "tikv" {
+		return nil
+	}
+
+	log.Info("serverless cluster info loading...", zap.Any("keyspace", cfg.KeyspaceName))
+	etcdAddrs, _, _, err := tikvconfig.ParsePath("tikv://" + cfg.Path)
+	if err != nil {
+		return err
+	}
+
+	pdCli, err := pd.NewClient(etcdAddrs, pd.SecurityOption{
+		CAPath:   cfg.Security.ClusterSSLCA,
+		CertPath: cfg.Security.ClusterSSLCert,
+		KeyPath:  cfg.Security.ClusterSSLKey,
+	},
+		pd.WithCustomTimeoutOption(time.Duration(cfg.PDClient.PDServerTimeout)*time.Second),
+	)
+	if err != nil {
+		return err
+	}
+	defer pdCli.Close()
+
+	// Load Keyspace meta with retry.
+	var keyspaceMeta *keyspacepb.KeyspaceMeta
+	err = util.RunWithRetry(util.DefaultMaxRetries, util.RetryInterval, func() (bool, error) {
+		var errInner error
+		keyspaceMeta, errInner = pdCli.LoadKeyspace(context.TODO(), cfg.KeyspaceName)
+		// Retry when pd not bootstrapped or if keyspace not exists.
+		if kvstore.IsNotBootstrappedError(errInner) || kvstore.IsKeyspaceNotExistError(errInner) {
+			return true, errInner
+		}
+		// Do not retry when success or encountered unexpected error.
+		return false, errInner
+	})
+	if err != nil {
+		return err
+	}
+
+	keyspace.Limiter.StartAdjustLimit(etcdAddrs, keyspaceMeta.Id)
+	metrics.SetServerlessLabels(keyspaceMeta.Config["serverless_tenant_id"],
+		keyspaceMeta.Config["serverless_project_id"],
+		keyspaceMeta.Config["serverless_cluster_id"])
+	log.Info("serverless cluster info loaded",
+		zap.Any("labels", metrics.ServerlessLabels),
+	)
+	return nil
 }
 
 func syncLog() {
@@ -389,6 +421,17 @@ func registerStores() {
 	terror.MustNil(err)
 }
 
+func reInitMetricsVars() {
+	copr.InitMetricsVars()
+	executor.InitMetricsVars()
+	infoschema.InitMetricsVars()
+	plannercore.InitMetricsVars()
+	server.InitMetricsVars()
+	session.InitMetricsVars()
+	statshandler.InitMetricsVars()
+	reporter.InitMetricsVars()
+}
+
 func startRateLimit() error {
 	// load keyspace and set metric labels.
 	cfg := config.GetGlobalConfig()
@@ -420,7 +463,9 @@ func startRateLimit() error {
 }
 
 func registerMetrics() {
+	metrics.DefineMetrics()
 	metrics.RegisterMetrics()
+	reInitMetricsVars()
 	if config.GetGlobalConfig().Store == "unistore" {
 		uni_metrics.RegisterMetrics()
 	}

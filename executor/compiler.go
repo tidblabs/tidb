@@ -17,6 +17,8 @@ package executor
 import (
 	"context"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
@@ -33,20 +35,6 @@ import (
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/memory"
 	"go.uber.org/zap"
-)
-
-var (
-	stmtNodeCounterUse       = metrics.StmtNodeCounter.WithLabelValues("Use")
-	stmtNodeCounterShow      = metrics.StmtNodeCounter.WithLabelValues("Show")
-	stmtNodeCounterBegin     = metrics.StmtNodeCounter.WithLabelValues("Begin")
-	stmtNodeCounterCommit    = metrics.StmtNodeCounter.WithLabelValues("Commit")
-	stmtNodeCounterRollback  = metrics.StmtNodeCounter.WithLabelValues("Rollback")
-	stmtNodeCounterInsert    = metrics.StmtNodeCounter.WithLabelValues("Insert")
-	stmtNodeCounterReplace   = metrics.StmtNodeCounter.WithLabelValues("Replace")
-	stmtNodeCounterDelete    = metrics.StmtNodeCounter.WithLabelValues("Delete")
-	stmtNodeCounterUpdate    = metrics.StmtNodeCounter.WithLabelValues("Update")
-	stmtNodeCounterSelect    = metrics.StmtNodeCounter.WithLabelValues("Select")
-	stmtNodeCounterSavepoint = metrics.StmtNodeCounter.WithLabelValues("Savepoint")
 )
 
 // Compiler compiles an ast.StmtNode to a physical plan.
@@ -232,6 +220,8 @@ func CountStmtNode(stmtNode ast.StmtNode, inRestrictedSQL bool) {
 	default:
 		metrics.StmtNodeCounter.WithLabelValues(typeLabel).Inc()
 	}
+
+	atomic.StoreInt64(&metrics.LastStmtTimestamp, time.Now().Unix())
 
 	if !config.GetGlobalConfig().Status.RecordQPSbyDB {
 		return

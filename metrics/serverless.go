@@ -14,9 +14,74 @@
 
 package metrics
 
+import (
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+const (
+	// TagTenantID for tenant_id
+	TagTenantID = "tenant_id"
+	// TagProjectID for project_id
+	TagProjectID = "project_id"
+	// TagClusterID for cluster_id
+	TagClusterID = "cluster_id"
+)
+
 // Identify serverless cluster. Should be setup before register metrics.
 var (
-	ServerlessTenantID  string
+	ServerlessLabels prometheus.Labels
+  ServerlessTenantID  string
 	ServerlessProjectID string
 	ServerlessClusterID string
 )
+
+// SetServerlessLabels sets tenantID, projectID and clusterID.
+func SetServerlessLabels(ServerlessTenantID, ServerlessProjectID, ServerlessClusterID string) {
+	ServerlessLabels = make(prometheus.Labels)
+	ServerlessLabels[TagTenantID] = ServerlessTenantID
+	ServerlessLabels[TagProjectID] = ServerlessProjectID
+	ServerlessLabels[TagClusterID] = ServerlessClusterID
+}
+
+// NewCounter wraps a prometheus.NewCounter.
+func NewCounter(opts prometheus.CounterOpts) prometheus.Counter {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewCounter(opts)
+}
+
+// NewCounterVec wraps a prometheus.NewCounterVec.
+func NewCounterVec(opts prometheus.CounterOpts, labelNames []string) *prometheus.CounterVec {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewCounterVec(opts, labelNames)
+}
+
+// NewGauge wraps a prometheus.NewGauge.
+func NewGauge(opts prometheus.GaugeOpts) prometheus.Gauge {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewGauge(opts)
+}
+
+// NewGaugeVec wraps a prometheus.NewGaugeVec.
+func NewGaugeVec(opts prometheus.GaugeOpts, labelNames []string) *prometheus.GaugeVec {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewGaugeVec(opts, labelNames)
+}
+
+// NewHistogram wraps a prometheus.NewHistogram.
+func NewHistogram(opts prometheus.HistogramOpts) prometheus.Histogram {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewHistogram(opts)
+}
+
+// NewHistogramVec wraps a prometheus.NewHistogramVec.
+func NewHistogramVec(opts prometheus.HistogramOpts, labelNames []string) *prometheus.HistogramVec {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewHistogramVec(opts, labelNames)
+}
+
+// NewSummaryVec wraps a prometheus.NewSummaryVec.
+func NewSummaryVec(opts prometheus.SummaryOpts, labelNames []string) *prometheus.SummaryVec {
+	opts.ConstLabels = ServerlessLabels
+	return prometheus.NewSummaryVec(opts, labelNames)
+}
+

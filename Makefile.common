@@ -80,6 +80,13 @@ ifneq "$(MIN_TIKV_VERSION)" ""
     LDFLAGS += -X "github.com/pingcap/tidb/util/versioninfo.TiKVMinVersion=$(MIN_TIKV_VERSION)"
 endif
 
+# Overwrites the variable REGISTER_METRICS_INIT is not set or is true, means we will register metrics when run metrics.go func init(),
+# if REGISTER_METRICS_INIT is false means it is tidb-server, it will not register metrics when run metrics.go func init().
+# if REGISTER_METRICS_INIT is explicitly set.
+ifneq "$(REGISTER_METRICS_INIT)" ""
+	LDFLAGS += -X "github.com/pingcap/tidb/metrics.EnvRegisterMetricsAtInit=$(REGISTER_METRICS_INIT)"
+endif
+
 TEST_LDFLAGS =  -X "github.com/pingcap/tidb/config.checkBeforeDropLDFlag=1"
 COVERAGE_SERVER_LDFLAGS =  -X "github.com/pingcap/tidb/tidb-server.isCoverageServer=1"
 
