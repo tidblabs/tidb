@@ -14,6 +14,8 @@ const (
 
 	// EnvVarKeyspaceName is the system env name for keyspace name.
 	EnvVarKeyspaceName = "KEYSPACE_NAME"
+	// NulSpaceID represents the API V1 data space.
+	NulSpaceID = 0xffffffff
 
 	// tidbKeyspaceEtcdPathPrefix is the keyspace prefix for etcd namespace
 	tidbKeyspaceEtcdPathPrefix = "/keyspaces/tidb/"
@@ -61,7 +63,7 @@ func toUint32(b []byte) uint32 {
 // GetID is used to get keyspace id bytes from keyspace prefix
 func GetID(b []byte) uint32 {
 	if len(b) < 4 {
-		return 0
+		return NulSpaceID
 	}
 	return toUint32(b[1:4])
 }

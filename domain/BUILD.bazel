@@ -103,6 +103,7 @@ go_test(
         "//ddl",
         "//domain/infosync",
         "//errno",
+        "//keyspace",
         "//kv",
         "//metrics",
         "//parser/ast",

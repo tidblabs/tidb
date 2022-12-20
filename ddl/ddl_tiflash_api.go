@@ -355,22 +355,6 @@ func updateTiFlashStores(pollTiFlashContext *TiFlashManagementContext) error {
 	return nil
 }
 
-func getTiFlashPeerWithoutLagCount(pollTiFlashContext *TiFlashManagementContext, tableID int64) (int, error) {
-	// storeIDs -> regionID, PD will not create two peer on the same store
-	var flashPeerCount int
-	for _, store := range pollTiFlashContext.TiFlashStores {
-		regionReplica := make(map[int64]int)
-		err := helper.CollectTiFlashStatus(store.Store.StatusAddress, tableID, &regionReplica)
-		if err != nil {
-			logutil.BgLogger().Error("Fail to get peer status from TiFlash.",
-				zap.Int64("tableID", tableID))
-			return 0, err
-		}
-		flashPeerCount += len(regionReplica)
-	}
-	return flashPeerCount, nil
-}
-
 func pollAvailableTableProgress(schemas infoschema.InfoSchema, ctx sessionctx.Context, pollTiFlashContext *TiFlashManagementContext) {
 	pollMaxCount := RefreshProgressMaxTableCount
 	failpoint.Inject("PollAvailableTableProgressMaxCount", func(val failpoint.Value) {

@@ -1013,7 +1013,13 @@ func (do *Domain) Init(
 
 	// step 1: prepare the info/schema syncer which domain reload needed.
 	skipRegisterToDashboard := config.GetGlobalConfig().SkipRegisterToDashboard
-	do.info, err = infosync.GlobalInfoSyncerInit(ctx, do.ddl.GetID(), do.ServerID, do.etcdClient, skipRegisterToDashboard)
+	do.info, err = infosync.GlobalInfoSyncerInit(ctx,
+		do.ddl.GetID(),
+		do.ServerID,
+		do.etcdClient,
+		do.Store().GetCodec(),
+		skipRegisterToDashboard,
+	)
 	if err != nil {
 		return err
 	}

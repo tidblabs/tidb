@@ -30,8 +30,8 @@ export-20*/
 # Files generated when testing
 out
 /_bazel
-bazel-bin
-bazel-out
-bazel-testlogs
-bazel-tidb-cse
+/bazel-bin
+/bazel-out
+/bazel-testlogs
+/bazel-tidb*
 .ijwb/
