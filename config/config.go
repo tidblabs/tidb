@@ -296,6 +296,8 @@ type Config struct {
 	// TiDBMaxReuseColumn indicates max cached column num
 	TiDBMaxReuseColumn uint32 `toml:"tidb-max-reuse-column" json:"tidb-max-reuse-column"`
 
+	// EnableAnalyze is used to control whether to analyze executor is enabled.
+	EnableAnalyze bool `toml:"enable-analyze" json:"enable-analyze"`
 	// Ratelimit is used to control the rate limit of the tenant requests.
 	Ratelimit RatelimitConfig `toml:"ratelimit" json:"ratelimit"`
 }
@@ -1000,6 +1002,7 @@ var defaultConf = Config{
 	TrxSummary:                           DefaultTrxSummary(),
 	TiDBMaxReuseChunk:                    64,
 	TiDBMaxReuseColumn:                   256,
+	EnableAnalyze:                        true,
 	Ratelimit:                            defaultRatelimitConfig(),
 }
 
