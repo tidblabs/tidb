@@ -16,12 +16,16 @@ package txn
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/keyspace"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/sessionctx/binloginfo"
@@ -76,8 +80,64 @@ func (txn *tikvTxn) LockKeys(ctx context.Context, lockCtx *kv.LockCtx, keysInput
 	return txn.extractKeyErr(err)
 }
 
+type size interface {
+	int64 | int
+}
+
+func toGiB[T size](size T) int {
+	return int(size / (1024 * 1024 * 1024))
+}
+
+func toMiB[T size](size T) int {
+	return int(size / (1024 * 1024))
+}
+
+func toKiB[T size](size T) int {
+	return int(size / 1024)
+}
+
+func humanReadable[T size](size T) string {
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	} else if size < 1024*1024 {
+		return fmt.Sprintf("%d KiB", toKiB(size))
+	} else if size < 1024*1024*1024 {
+		return fmt.Sprintf("%d MiB", toMiB(size))
+	} else {
+		return fmt.Sprintf("%d GiB", toGiB(size))
+	}
+}
+
 func (txn *tikvTxn) Commit(ctx context.Context) error {
 	err := txn.KVTxn.Commit(ctx)
+	if keyspace.GetKeyspaceNameBySettings() != "" && txn.GetDiskFullOpt() == kvrpcpb.DiskFullOpt_NotAllowedOnFull {
+		txnSize := txn.GetUnionStore().GetMemBuffer().Size()
+		for txnSize > 0 {
+			ok, wait := keyspace.Limiter.Consume(txnSize)
+			if ok {
+				break
+			}
+			if wait == time.Duration(0) {
+				usage := keyspace.Limiter.Usage()
+				txnLimit := fmt.Sprintf(
+					"You have reached max transaction limit %s of Serverless Tier cluster",
+					humanReadable(keyspace.Limiter.MaxToken()))
+				cfg := config.GetGlobalConfig().Ratelimit
+				if usage < cfg.LowSpeedWatermark {
+					return errors.New(txnLimit + ".")
+				}
+				if usage < cfg.BlockWriteWatermark {
+					return errors.New(fmt.Sprintf("%s when total used data %s is more than soft "+
+						"limit %s at beta stage.", txnLimit, humanReadable(usage), humanReadable(cfg.LowSpeedCapacity)))
+				}
+				return errors.New(fmt.Sprintf("%s when total used data %s is more than twice of "+
+					"soft limit %s at beta stage. Please delete some of your data to reclaim spaces. "+
+					"Be aware that deleting data is also throttled and can be slow.",
+					txnLimit, humanReadable(usage), humanReadable(cfg.LowSpeedWatermark)))
+			}
+			time.Sleep(wait + time.Millisecond*10)
+		}
+	}
 	return txn.extractKeyErr(err)
 }
 

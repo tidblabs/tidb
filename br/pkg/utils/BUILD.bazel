@@ -29,6 +29,7 @@ go_library(
         "//br/pkg/logutil",
         "//br/pkg/metautil",
         "//errno",
+        "//keyspace",
         "//kv",
         "//parser/model",
         "//parser/mysql",

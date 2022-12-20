@@ -295,6 +295,9 @@ type Config struct {
 	TiDBMaxReuseChunk uint32 `toml:"tidb-max-reuse-chunk" json:"tidb-max-reuse-chunk"`
 	// TiDBMaxReuseColumn indicates max cached column num
 	TiDBMaxReuseColumn uint32 `toml:"tidb-max-reuse-column" json:"tidb-max-reuse-column"`
+
+	// Ratelimit is used to control the rate limit of the tenant requests.
+	Ratelimit RatelimitConfig `toml:"ratelimit" json:"ratelimit"`
 }
 
 // UpdateTempStoragePath is to update the `TempStoragePath` if port/statusPort was changed
@@ -997,6 +1000,7 @@ var defaultConf = Config{
 	TrxSummary:                           DefaultTrxSummary(),
 	TiDBMaxReuseChunk:                    64,
 	TiDBMaxReuseColumn:                   256,
+	Ratelimit:                            defaultRatelimitConfig(),
 }
 
 var (

@@ -297,7 +297,11 @@ func main() {
 	mainErrHandler(err)
 	svr := createServer(storage, dom)
 
+	err = startRateLimit()
+	terror.MustNil(err)
+
 	session.RunBootstrapSQL(storage)
+
 
 	// Register error API is not thread-safe, the caller MUST NOT register errors after initialization.
 	// To prevent misuse, set a flag to indicate that register new error will panic immediately.
@@ -383,6 +387,36 @@ func registerStores() {
 	terror.MustNil(err)
 	err = kvstore.Register("unistore", mockstore.EmbedUnistoreDriver{})
 	terror.MustNil(err)
+}
+
+func startRateLimit() error {
+	// load keyspace and set metric labels.
+	cfg := config.GetGlobalConfig()
+	if strings.ToLower(cfg.Store) == "tikv" {
+		etcdAddrs, _, _, err := tikvconfig.ParsePath("tikv://" + cfg.Path)
+		if err != nil {
+			return err
+		}
+		pdCli, err := pd.NewClient(etcdAddrs, pd.SecurityOption{
+			CAPath:   cfg.Security.ClusterSSLCA,
+			CertPath: cfg.Security.ClusterSSLCert,
+			KeyPath:  cfg.Security.ClusterSSLKey,
+		},
+			pd.WithCustomTimeoutOption(time.Duration(cfg.PDClient.PDServerTimeout)*time.Second),
+		)
+		if err != nil {
+			return err
+		}
+		defer pdCli.Close()
+
+		log.Info("start rate limit")
+		keyspaceMeta, err := pdCli.LoadKeyspace(context.TODO(), cfg.KeyspaceName)
+		if err != nil {
+			return err
+		}
+		keyspace.Limiter.StartAdjustLimit(etcdAddrs, keyspaceMeta.Id)
+	}
+	return nil
 }
 
 func registerMetrics() {
