@@ -42,6 +42,7 @@ RUN make build_br
 # Executable image
 FROM debian:bullseye-slim
 RUN apt update && apt install -y bash curl netcat dumb-init && rm /bin/sh && ln -s /bin/bash /bin/sh && apt-get clean
+ENV BR_LOG_TO_TERM=1
 
 COPY --from=builder /go/src/github.com/pingcap/tidb/bin/br /br
 
