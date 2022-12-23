@@ -927,10 +927,10 @@ github.com/tiancaiamao/appdash v0.0.0-20181126055449-889f96f722a2 h1:mbAskLJ0oJf
 github.com/tiancaiamao/appdash v0.0.0-20181126055449-889f96f722a2/go.mod h1:2PfKggNGDuadAa0LElHrByyrz4JPZ9fFx6Gs7nx7ZZU=
 github.com/tidblabs/client-go/v2 v2.0.1-0.20221222021553-9051b711aacd h1:wVJi1GVEJgWkvig5tGsSU6+Ia/Vtiy+tiqGo75Y1y6Q=
 github.com/tidblabs/client-go/v2 v2.0.1-0.20221222021553-9051b711aacd/go.mod h1:iQYeLRefDf60OCSdbWowlHikDGH92IGbKFylEylsKKY=
-github.com/tidblabs/pd v0.0.0-20221222035201-a519c54d1322 h1:zkbQh7HkO5pTyQo/uVoIs3cpdy23q7HkuRKd9vjU/Ks=
-github.com/tidblabs/pd v0.0.0-20221222035201-a519c54d1322/go.mod h1:PpgqnYUA6dnuHKmol7XVxkb6oKxzJ+YjsOamWCwrATw=
-github.com/tidblabs/pd/client v0.0.0-20221222035201-a519c54d1322 h1:foTQfuim3DYq3RB1K85lpyTKAduWXOLE7eu++DdbXhs=
-github.com/tidblabs/pd/client v0.0.0-20221222035201-a519c54d1322/go.mod h1:+YPCXGf03hN+LJV4ZvYjgnj49KnCdyffAuog6iFjdfI=
+github.com/tidblabs/pd v0.0.0-20221223031412-678eea265782 h1:+HIaFXll3ZL/FFSlcOvU6H3GPATxLzMOcvO8M64wNdA=
+github.com/tidblabs/pd v0.0.0-20221223031412-678eea265782/go.mod h1:PpgqnYUA6dnuHKmol7XVxkb6oKxzJ+YjsOamWCwrATw=
+github.com/tidblabs/pd/client v0.0.0-20221223031412-678eea265782 h1:m44kVoqZC+COrqOx3tgjcXs32wIAwTOAtM/4jnwBkyI=
+github.com/tidblabs/pd/client v0.0.0-20221223031412-678eea265782/go.mod h1:+YPCXGf03hN+LJV4ZvYjgnj49KnCdyffAuog6iFjdfI=
 github.com/timakin/bodyclose v0.0.0-20210704033933-f49887972144 h1:kl4KhGNsJIbDHS9/4U9yQo1UcPQM0kOMJHn29EoH/Ro=
 github.com/timakin/bodyclose v0.0.0-20210704033933-f49887972144/go.mod h1:Qimiffbc6q9tBWlVV6x0P9sat/ao1xEkREYPPj9hphk=
 github.com/tklauser/go-sysconf v0.3.9/go.mod h1:11DU/5sG7UexIrp/O6g35hrWzu0JxlwQ3LSFUzyeuhs=

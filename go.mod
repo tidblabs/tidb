@@ -257,7 +257,7 @@ replace (
 	github.com/pingcap/kvproto => github.com/nolouch/kvproto v0.0.0-20221220074114-39f3378735d2
 	github.com/pingcap/tidb/parser => ./parser
 	github.com/tikv/client-go/v2 => github.com/tidblabs/client-go/v2 v2.0.1-0.20221222021553-9051b711aacd
-	github.com/tikv/pd => github.com/tidblabs/pd v0.0.0-20221222035201-a519c54d1322
-	github.com/tikv/pd/client => github.com/tidblabs/pd/client v0.0.0-20221222035201-a519c54d1322
+	github.com/tikv/pd => github.com/tidblabs/pd v0.0.0-20221223031412-678eea265782
+	github.com/tikv/pd/client => github.com/tidblabs/pd/client v0.0.0-20221223031412-678eea265782
 	go.opencensus.io => go.opencensus.io v0.23.1-0.20220331163232-052120675fac
 )
