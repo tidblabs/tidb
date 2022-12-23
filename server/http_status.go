@@ -42,6 +42,7 @@ import (
 	pb "github.com/pingcap/kvproto/pkg/autoid"
 	autoid "github.com/pingcap/tidb/autoid_service"
 	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/keyspace"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -468,7 +469,8 @@ func (s *Server) startStatusServerAndRPCServer(serverMux *http.ServeMux) {
 	service.RegisterChannelzServiceToServer(grpcServer)
 	if s.cfg.Store == "tikv" {
 		for {
-			fullPath := fmt.Sprintf("tikv://%s", s.cfg.Path)
+			keyspaceName := keyspace.GetKeyspaceNameBySettings()
+			fullPath := fmt.Sprintf("%s://%s?keyspaceName=%s", s.cfg.Store, s.cfg.Path, keyspaceName)
 			store, err := store.New(fullPath)
 			if err != nil {
 				logutil.BgLogger().Error("new tikv store fail", zap.Error(err))
