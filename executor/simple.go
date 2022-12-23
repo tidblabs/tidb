@@ -655,7 +655,7 @@ func (e *SimpleExec) executeRevokeRole(ctx context.Context, s *ast.RevokeRoleStm
 	e.setCurrentUser(s.Users)
 
 	for _, role := range s.Roles {
-		exists, err := userExists(ctx, e.ctx, role.Username, role.Hostname)
+		exists, err := userExistsWithRetryUserPrefix(ctx, e.ctx, &role.Username, role.Hostname)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1035,7 +1035,7 @@ func (e *SimpleExec) executeAlterUser(ctx context.Context, s *ast.AlterUserStmt)
 			}
 		}
 
-		exists, err := userExists(ctx, e.ctx, spec.User.Username, spec.User.Hostname)
+		exists, err := userExistsWithRetryUserPrefix(ctx, e.ctx, &spec.User.Username, spec.User.Hostname)
 		if err != nil {
 			return err
 		}
@@ -1184,7 +1184,7 @@ func (e *SimpleExec) executeGrantRole(ctx context.Context, s *ast.GrantRoleStmt)
 	e.setCurrentUser(s.Users)
 
 	for _, role := range s.Roles {
-		exists, err := userExists(ctx, e.ctx, role.Username, role.Hostname)
+		exists, err := userExistsWithRetryUserPrefix(ctx, e.ctx, &role.Username, role.Hostname)
 		if err != nil {
 			return err
 		}
@@ -1193,7 +1193,7 @@ func (e *SimpleExec) executeGrantRole(ctx context.Context, s *ast.GrantRoleStmt)
 		}
 	}
 	for _, user := range s.Users {
-		exists, err := userExists(ctx, e.ctx, user.Username, user.Hostname)
+		exists, err := userExistsWithRetryUserPrefix(ctx, e.ctx, &user.Username, user.Hostname)
 		if err != nil {
 			return err
 		}
@@ -1540,6 +1540,28 @@ func userExists(ctx context.Context, sctx sessionctx.Context, name string, host 
 		return false, err
 	}
 	return len(rows) > 0, nil
+}
+
+func userExistsWithRetryUserPrefix(ctx context.Context, sctx sessionctx.Context, name *string, host string) (bool, error) {
+	exists, err := userExists(ctx, sctx, *name, host)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return true, nil
+	}
+	// Check if user exists with user prefix.
+	prefix := domain.GetUserPrefix()
+	if prefix == "" {
+		return false, nil
+	}
+	name2 := prefix + "." + *name
+	exists, err = userExists(ctx, sctx, name2, host)
+	if err != nil || !exists {
+		return false, err
+	}
+	*name = name2
+	return true, nil
 }
 
 // use the same internal executor to read within the same transaction, otherwise same as userExists
