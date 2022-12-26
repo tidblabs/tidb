@@ -70,6 +70,8 @@ const (
 	ResourceGroupTag
 	// ResourceGroupTagger can be used to set the ResourceGroupTag dynamically according to the request content. It will be used only when ResourceGroupTag is nil.
 	ResourceGroupTagger
+	//
+	ResourceGroupName
 	// KVFilter indicates the filter to ignore key-values in the transaction's memory buffer.
 	KVFilter
 	// SnapInterceptor is used for setting the interceptor for snapshot

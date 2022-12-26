@@ -101,7 +101,7 @@ func (e *BatchPointGetExec) Open(context.Context) error {
 	e.txn = txn
 
 	setOptionForTopSQL(e.ctx.GetSessionVars().StmtCtx, e.snapshot)
-	e.snapshot.SetOption(kv.ResourceGroupTag, []byte(e.RGroupName))
+	e.snapshot.SetOption(kv.ResourceGroupName, e.RGroupName)
 	var batchGetter kv.BatchGetter = e.snapshot
 	if txn.Valid() {
 		lock := e.tblInfo.Lock

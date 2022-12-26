@@ -191,7 +191,7 @@ func (e *PointGetExecutor) Open(context.Context) error {
 		return err
 	}
 	setOptionForTopSQL(e.ctx.GetSessionVars().StmtCtx, e.snapshot)
-	e.snapshot.SetOption(kv.ResourceGroupTag, []byte(e.RGroupName))
+	e.snapshot.SetOption(kv.ResourceGroupName, e.RGroupName)
 	return nil
 }
 
