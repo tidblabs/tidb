@@ -109,7 +109,6 @@ func humanReadable[T size](size T) string {
 }
 
 func (txn *tikvTxn) Commit(ctx context.Context) error {
-	err := txn.KVTxn.Commit(ctx)
 	if keyspace.GetKeyspaceNameBySettings() != "" && txn.GetDiskFullOpt() == kvrpcpb.DiskFullOpt_NotAllowedOnFull {
 		txnSize := txn.GetUnionStore().GetMemBuffer().Size()
 		for txnSize > 0 {
@@ -138,6 +137,7 @@ func (txn *tikvTxn) Commit(ctx context.Context) error {
 			time.Sleep(wait + time.Millisecond*10)
 		}
 	}
+	err := txn.KVTxn.Commit(ctx)
 	return txn.extractKeyErr(err)
 }
 
