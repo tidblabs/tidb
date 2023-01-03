@@ -2162,6 +2162,10 @@ func doDMLWorks(s Session) {
 		mysql.SystemDB, mysql.TiDBTable, tidbServerVersionVar, currentBootstrapVersion,
 	)
 
+	mustExecute(s, `INSERT HIGH_PRIORITY INTO %n.%n VALUES(%?, %?, "Serverless bootstrap version. Do not delete.")`,
+		mysql.SystemDB, mysql.TiDBTable, serverlessVersionVar, currentServerlessVersion,
+	)
+
 	writeSystemTZ(s)
 
 	writeNewCollationParameter(s, config.GetGlobalConfig().NewCollationsEnabledOnFirstBootstrap)
