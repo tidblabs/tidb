@@ -49,6 +49,7 @@ type tikvTxn struct {
 	snapshotInterceptor kv.SnapshotInterceptor
 	// columnMapsCache is a cache used for the mutation checker
 	columnMapsCache interface{}
+	restrictedSQL   bool
 }
 
 // NewTiKVTxn returns a new Transaction.
@@ -59,7 +60,7 @@ func NewTiKVTxn(txn *tikv.KVTxn) kv.Transaction {
 	totalLimit := atomic.LoadUint64(&kv.TxnTotalSizeLimit)
 	txn.GetUnionStore().SetEntrySizeLimit(entryLimit, totalLimit)
 
-	return &tikvTxn{txn, make(map[int64]*model.TableInfo), nil, nil}
+	return &tikvTxn{txn, make(map[int64]*model.TableInfo), nil, nil, false}
 }
 
 func (txn *tikvTxn) GetTableInfo(id int64) *model.TableInfo {
@@ -68,6 +69,10 @@ func (txn *tikvTxn) GetTableInfo(id int64) *model.TableInfo {
 
 func (txn *tikvTxn) SetDiskFullOpt(level kvrpcpb.DiskFullOpt) {
 	txn.KVTxn.SetDiskFullOpt(level)
+}
+
+func (txn *tikvTxn) SetRestrictedSQL(b bool) {
+	txn.restrictedSQL = b
 }
 
 func (txn *tikvTxn) CacheTableInfo(id int64, info *model.TableInfo) {
@@ -109,7 +114,7 @@ func humanReadable[T size](size T) string {
 }
 
 func (txn *tikvTxn) Commit(ctx context.Context) error {
-	if keyspace.GetKeyspaceNameBySettings() != "" && txn.GetDiskFullOpt() == kvrpcpb.DiskFullOpt_NotAllowedOnFull {
+	if keyspace.GetKeyspaceNameBySettings() != "" && txn.GetDiskFullOpt() == kvrpcpb.DiskFullOpt_NotAllowedOnFull && !txn.restrictedSQL {
 		txnSize := txn.GetUnionStore().GetMemBuffer().Size()
 		for txnSize > 0 {
 			ok, wait := keyspace.Limiter.Consume(txnSize)
